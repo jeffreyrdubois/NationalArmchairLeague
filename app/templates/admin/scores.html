@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Manage Scores &mdash; NAL{% endblock %}
+{% block content %}
+
+<h1 class="text-2xl font-bold mb-6">Manage Scores</h1>
+<p class="text-sm text-gray-500 mb-6">Use this only if automatic score fetching is failing. Scores are normally updated every 5 minutes.</p>
+
+{% if not current_week %}
+<p class="text-gray-500">No active week.</p>
+{% else %}
+<h2 class="font-semibold text-lg mb-4">{{ current_week.label or ('Week ' + current_week.week_number|string) }}</h2>
+
+<div class="space-y-3">
+  {% for game in games %}
+  <div class="bg-white rounded-xl shadow p-4">
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-3">
+        <img src="{{ game.away_team_logo }}" class="w-8 h-8 object-contain" onerror="this.style.display='none'" />
+        <span class="font-medium">{{ game.away_team_name or game.away_team }}</span>
+        <span class="text-gray-400">@</span>
+        <span class="font-medium">{{ game.home_team_name or game.home_team }}</span>
+        <img src="{{ game.home_team_logo }}" class="w-8 h-8 object-contain" onerror="this.style.display='none'" />
+      </div>
+      <div class="text-sm text-gray-500">
+        {{ game.kickoff_time.strftime('%-I:%M%p ET') if game.kickoff_time else '' }}
+        {% if game.is_final %}<span class="ml-2 text-green-600 font-medium">Final</span>
+        {% elif game.is_in_progress %}<span class="ml-2 text-green-600 live-pulse">Live</span>{% endif %}
+      </div>
+    </div>
+    <form method="post" action="/admin/scores/update" class="flex items-center gap-3">
+      <input type="hidden" name="game_id" value="{{ game.id }}" />
+      <label class="text-sm text-gray-600">{{ game.away_team }}</label>
+      <input name="away_score" type="number" min="0"
+        value="{{ game.away_score if game.away_score is not none else '' }}"
+        class="w-16 border rounded px-2 py-1 text-center font-bold" />
+      <span class="text-gray-400">-</span>
+      <input name="home_score" type="number" min="0"
+        value="{{ game.home_score if game.home_score is not none else '' }}"
+        class="w-16 border rounded px-2 py-1 text-center font-bold" />
+      <label class="text-sm text-gray-600">{{ game.home_team }}</label>
+      <label class="flex items-center gap-1 text-sm text-gray-600 ml-2">
+        <input name="is_final" type="checkbox" value="true" {% if game.is_final %}checked{% endif %} /> Final
+      </label>
+      <button class="bg-blue-600 text-white text-sm px-3 py-1 rounded hover:bg-blue-700">Save</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% endblock %}

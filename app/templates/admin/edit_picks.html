@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Edit Picks &mdash; Admin{% endblock %}
+{% block content %}
+
+<div class="max-w-2xl mx-auto">
+  <div class="flex items-center gap-3 mb-6">
+    <a href="/admin/week/{{ week.id }}" class="text-gray-400 hover:text-gray-600 text-sm">&larr; Back</a>
+    <h1 class="text-xl font-bold">Edit Picks: {{ target_user.display_name }}</h1>
+    <span class="text-sm text-gray-500">{{ week.label or ('Week ' + week.week_number|string) }}</span>
+  </div>
+
+  <div class="bg-yellow-50 border border-yellow-300 rounded-lg p-3 mb-5 text-sm text-yellow-800">
+    You are editing picks as an admin. All changes are logged.
+  </div>
+
+  <form method="post" action="/admin/picks/edit/{{ target_user.id }}/{{ week.id }}">
+    {% for game in games %}
+    {% set my_pick = existing_picks.get(game.id) %}
+    <div class="bg-white rounded-xl shadow mb-4 p-4">
+      <div class="text-sm font-semibold mb-2">{{ game.away_team }} @ {{ game.home_team }}
+        <span class="text-gray-400 font-normal ml-2 text-xs">
+          Spread: {% if game.spread is not none %}{{ "%.1f"|format(game.spread) }}{% else %}TBD{% endif %}
+        </span>
+      </div>
+      <div class="flex gap-3">
+        <select name="game_{{ game.id }}_team" class="flex-1 border rounded px-2 py-1.5 text-sm">
+          <option value="">-- Pick team --</option>
+          <option value="{{ game.away_team }}" {% if my_pick and my_pick.picked_team == game.away_team %}selected{% endif %}>
+            {{ game.away_team_name or game.away_team }}
+          </option>
+          <option value="{{ game.home_team }}" {% if my_pick and my_pick.picked_team == game.home_team %}selected{% endif %}>
+            {{ game.home_team_name or game.home_team }}
+          </option>
+        </select>
+        <select name="game_{{ game.id }}_points" class="w-32 border rounded px-2 py-1.5 text-sm">
+          <option value="">-- Points --</option>
+          {% for pt in available_points %}
+          <option value="{{ pt }}" {% if my_pick and my_pick.confidence_points == pt %}selected{% endif %}>
+            {{ pt }} pts
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    {% endfor %}
+
+    <button type="submit"
+      class="w-full bg-yellow-400 text-gray-900 font-bold py-3 rounded-xl hover:bg-yellow-300 transition">
+      Save Picks for {{ target_user.display_name }}
+    </button>
+  </form>
+</div>
+
+{% endblock %}
