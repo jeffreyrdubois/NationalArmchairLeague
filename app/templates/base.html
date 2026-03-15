@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}National Armchair League{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    /* Team color accents, live pulse */
+    .live-pulse { animation: pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+    .pick-correct  { background-color: #dcfce7; border-color: #16a34a; }
+    .pick-wrong    { background-color: #fee2e2; border-color: #dc2626; }
+    .pick-pending  { background-color: #fef9c3; border-color: #ca8a04; }
+  </style>
+</head>
+<body class="h-full bg-gray-50 text-gray-900">
+
+  <!-- Navbar -->
+  <nav class="bg-gray-900 text-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-6">
+          <a href="/" class="text-xl font-bold tracking-tight text-yellow-400">NAL</a>
+          {% if user %}
+          <a href="/" class="text-sm hover:text-yellow-300 transition">Dashboard</a>
+          <a href="/picks" class="text-sm hover:text-yellow-300 transition">My Picks</a>
+          <a href="/standings" class="text-sm hover:text-yellow-300 transition">Standings</a>
+          {% if user.role in ('contributor', 'admin') %}
+          <div class="relative group">
+            <button class="text-sm hover:text-yellow-300 transition">Manage ▾</button>
+            <div class="absolute left-0 top-full hidden group-hover:block bg-gray-800 rounded shadow-lg py-1 z-50 w-40">
+              <a href="/admin/spreads" class="block px-4 py-2 text-sm hover:bg-gray-700">Spreads</a>
+              <a href="/admin/scores" class="block px-4 py-2 text-sm hover:bg-gray-700">Scores</a>
+              {% if user.role == 'admin' %}
+              <a href="/admin/" class="block px-4 py-2 text-sm hover:bg-gray-700">Admin Panel</a>
+              {% endif %}
+            </div>
+          </div>
+          {% endif %}
+          {% endif %}
+        </div>
+        <div class="flex items-center gap-4">
+          {% if user %}
+          <a href="/profile/{{ user.username }}" class="text-sm text-gray-300 hover:text-white">
+            {{ user.display_name }}
+            <span class="ml-1 text-xs px-1.5 py-0.5 rounded
+              {% if user.role == 'admin' %}bg-red-600
+              {% elif user.role == 'contributor' %}bg-blue-600
+              {% else %}bg-gray-600{% endif %}">
+              {{ user.role }}
+            </span>
+          </a>
+          <a href="/logout" class="text-sm text-gray-400 hover:text-white">Logout</a>
+          {% else %}
+          <a href="/login" class="text-sm hover:text-yellow-300">Login</a>
+          <a href="/register" class="text-sm bg-yellow-400 text-gray-900 px-3 py-1 rounded font-medium hover:bg-yellow-300">Register</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Flash messages -->
+  {% if request.query_params.get('saved') %}
+  <div class="bg-green-100 border border-green-400 text-green-800 px-4 py-3 text-center text-sm">
+    Picks saved successfully!
+  </div>
+  {% endif %}
+
+  <!-- Main content -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="mt-16 py-6 text-center text-xs text-gray-400">
+    National Armchair League &mdash; Pick em' &amp; win em'
+  </footer>
+</body>
+</html>

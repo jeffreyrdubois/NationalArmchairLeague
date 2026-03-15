@@ -1,0 +1,35 @@
+version: "3.8"
+
+services:
+  nal:
+    build: .
+    container_name: nal
+    restart: unless-stopped
+    ports:
+      - "8000:8000"         # Change left side if port 8000 is taken on your Unraid host
+    volumes:
+      - ./data:/app/data    # SQLite database persists here
+    environment:
+      # REQUIRED: Change this to a long random string before deploying
+      - SECRET_KEY=change-me-to-a-long-random-secret-key
+
+      # OPTIONAL: Get a free key at https://the-odds-api.com (500 req/month free tier)
+      # If not set, spreads must be entered manually by Contributors
+      - ODDS_API_KEY=
+
+      # Set to "false" once everyone has registered to prevent new signups
+      - REGISTRATION_OPEN=true
+
+      # Database path (leave as-is when using the volume mount above)
+      - DATABASE_URL=sqlite:////app/data/nal.db
+
+    # For SWAG reverse proxy integration:
+    # Make sure nal is on the same Docker network as SWAG
+    # networks:
+    #   - swag_default
+    # Then in SWAG's nginx/proxy-confs/ create nal.subdomain.conf:
+    #   proxy_pass http://nal:8000;
+
+# networks:
+#   swag_default:
+#     external: true

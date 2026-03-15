@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Admin Panel &mdash; NAL{% endblock %}
+{% block content %}
+
+<h1 class="text-2xl font-bold mb-6">Admin Panel</h1>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+
+  <!-- Create Season -->
+  <div class="bg-white rounded-xl shadow p-5">
+    <h2 class="font-semibold text-lg mb-4">Seasons</h2>
+    <form method="post" action="/admin/season/create" class="flex gap-2 mb-4">
+      <input name="year" type="number" placeholder="Year e.g. 2025" required min="2000" max="2100"
+        class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+      <label class="flex items-center gap-1 text-sm text-gray-600">
+        <input name="make_active" type="checkbox" value="true" /> Active
+      </label>
+      <button class="bg-yellow-400 text-gray-900 font-bold px-3 py-2 rounded-lg text-sm hover:bg-yellow-300">
+        Create
+      </button>
+    </form>
+    <table class="w-full text-sm">
+      <tbody>
+        {% for season in seasons %}
+        <tr class="border-t">
+          <td class="py-2 font-semibold">{{ season.year }}</td>
+          <td class="py-2">
+            {% if season.is_active %}
+            <span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded">Active</span>
+            {% endif %}
+          </td>
+          <td class="py-2 text-right">
+            <a href="/admin/week/create?season_id={{ season.id }}" class="text-blue-600 text-xs hover:underline">
+              Add Week
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Create Week -->
+  <div class="bg-white rounded-xl shadow p-5">
+    <h2 class="font-semibold text-lg mb-4">Add Week</h2>
+    <form method="post" action="/admin/week/create" class="space-y-3">
+      <select name="season_id" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        {% for season in seasons %}
+        <option value="{{ season.id }}" {% if season.is_active %}selected{% endif %}>
+          {{ season.year }}{% if season.is_active %} (active){% endif %}
+        </option>
+        {% endfor %}
+      </select>
+      <div class="flex gap-2">
+        <input name="week_number" type="number" placeholder="Week #" required min="1" max="22"
+          class="w-1/3 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+        <input name="espn_week" type="number" placeholder="ESPN Week #"
+          class="w-1/3 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+        <input name="label" type="text" placeholder="Label (optional)"
+          class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+      </div>
+      <button class="w-full bg-yellow-400 text-gray-900 font-bold py-2 rounded-lg text-sm hover:bg-yellow-300">
+        Create Week
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- Users quick view -->
+<div class="bg-white rounded-xl shadow p-5 mb-8">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="font-semibold text-lg">Users</h2>
+    <a href="/admin/users" class="text-blue-600 text-sm hover:underline">Manage all &rarr;</a>
+  </div>
+  <table class="w-full text-sm">
+    <tbody>
+      {% for u in users %}
+      <tr class="border-t">
+        <td class="py-2 font-medium">{{ u.display_name }}</td>
+        <td class="py-2 text-gray-500">@{{ u.username }}</td>
+        <td class="py-2">
+          <span class="text-xs px-2 py-0.5 rounded capitalize
+            {% if u.role == 'admin' %}bg-red-100 text-red-700
+            {% elif u.role == 'contributor' %}bg-blue-100 text-blue-700
+            {% else %}bg-gray-100 text-gray-600{% endif %}">
+            {{ u.role }}
+          </span>
+        </td>
+        <td class="py-2 text-right">
+          {% if not u.is_active %}<span class="text-xs text-red-500">Disabled</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Recent audit log -->
+<div class="bg-white rounded-xl shadow p-5">
+  <h2 class="font-semibold text-lg mb-4">Recent Activity</h2>
+  <div class="space-y-2">
+    {% for log in recent_logs %}
+    <div class="text-sm flex gap-3 border-b pb-2">
+      <span class="text-gray-400 whitespace-nowrap">{{ log.created_at.strftime('%m/%d %H:%M') }}</span>
+      <span class="font-medium">{{ log.user.display_name if log.user else '?' }}</span>
+      <span class="text-gray-600">{{ log.action }}</span>
+      <span class="text-gray-400 truncate">{{ log.detail }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+{% endblock %}

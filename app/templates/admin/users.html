@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Users &mdash; Admin{% endblock %}
+{% block content %}
+
+<div class="flex items-center gap-3 mb-6">
+  <a href="/admin/" class="text-gray-400 hover:text-gray-600 text-sm">&larr; Admin</a>
+  <h1 class="text-2xl font-bold">Manage Users</h1>
+</div>
+
+<div class="bg-white rounded-xl shadow overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+      <tr>
+        <th class="text-left px-4 py-3">Name</th>
+        <th class="text-left px-4 py-3">Username</th>
+        <th class="text-left px-4 py-3">Email</th>
+        <th class="text-center px-4 py-3">Role</th>
+        <th class="text-center px-4 py-3">Status</th>
+        <th class="text-center px-4 py-3">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr class="border-t hover:bg-gray-50">
+        <td class="px-4 py-3 font-medium">{{ u.display_name }}</td>
+        <td class="px-4 py-3 text-gray-500">@{{ u.username }}</td>
+        <td class="px-4 py-3 text-gray-500">{{ u.email }}</td>
+        <td class="px-4 py-3 text-center">
+          {% if u.id != user.id %}
+          <form method="post" action="/admin/users/{{ u.id }}/role" class="inline">
+            <select name="role" onchange="this.form.submit()"
+              class="text-xs border rounded px-1 py-0.5">
+              {% for r in roles %}
+              <option value="{{ r.value }}" {% if u.role == r %}selected{% endif %}>{{ r.value }}</option>
+              {% endfor %}
+            </select>
+          </form>
+          {% else %}
+          <span class="text-xs text-gray-500 capitalize">{{ u.role }} (you)</span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3 text-center">
+          <span class="text-xs {% if u.is_active %}text-green-600{% else %}text-red-500{% endif %}">
+            {% if u.is_active %}Active{% else %}Disabled{% endif %}
+          </span>
+        </td>
+        <td class="px-4 py-3 text-center">
+          {% if u.id != user.id %}
+          <form method="post" action="/admin/users/{{ u.id }}/toggle" class="inline">
+            <button class="text-xs px-2 py-1 rounded border hover:bg-gray-100">
+              {% if u.is_active %}Disable{% else %}Enable{% endif %}
+            </button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}All Picks &mdash; {{ week.label or ('Week ' + week.week_number|string) }}{% endblock %}
+{% block content %}
+
+<h1 class="text-2xl font-bold mb-2">{{ week.label or ('Week ' + week.week_number|string) }} &mdash; All Picks</h1>
+<p class="text-sm text-gray-500 mb-6">Picks revealed after the first game kicks off.</p>
+
+<!-- Week standings -->
+<div class="bg-white rounded-xl shadow p-5 mb-6">
+  <h2 class="font-semibold text-lg mb-3">Week Standings</h2>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-xs text-gray-500 uppercase">
+          <th class="text-left pb-2 pr-4">#</th>
+          <th class="text-left pb-2 pr-4">Player</th>
+          <th class="text-right pb-2 pr-4">Points</th>
+          <th class="text-right pb-2 pr-4">Correct</th>
+          <th class="text-right pb-2">Pending</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for i, row in standings|enumerate %}
+        <tr class="border-t {% if row.user.id == user.id %}bg-yellow-50{% endif %}">
+          <td class="py-2 pr-4 text-gray-400">{{ i + 1 }}</td>
+          <td class="py-2 pr-4 font-medium">{{ row.user.display_name }}</td>
+          <td class="py-2 pr-4 text-right font-bold">{{ row.total|int }}</td>
+          <td class="py-2 pr-4 text-right text-green-600">{{ row.correct }}</td>
+          <td class="py-2 text-right text-yellow-600">{{ row.pending }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Pick matrix -->
+<div class="bg-white rounded-xl shadow overflow-x-auto">
+  <table class="text-sm w-full">
+    <thead class="bg-gray-50">
+      <tr>
+        <th class="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Game</th>
+        <th class="text-center px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Spread</th>
+        <th class="text-center px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Result</th>
+        {% for u in users %}
+        <th class="text-center px-3 py-3 font-medium text-gray-600 whitespace-nowrap">
+          <a href="/profile/{{ u.username }}" class="hover:underline">
+            {{ u.display_name.split(' ')[0] }}
+          </a>
+        </th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for game in games %}
+      <tr class="border-t hover:bg-gray-50">
+        <td class="px-4 py-3 whitespace-nowrap">
+          <div class="flex items-center gap-2">
+            <img src="{{ game.away_team_logo }}" class="w-6 h-6 object-contain" onerror="this.style.display='none'" />
+            <span class="text-gray-500">{{ game.away_team }}</span>
+            <span class="text-gray-400">@</span>
+            <span class="font-medium">{{ game.home_team }}</span>
+            <img src="{{ game.home_team_logo }}" class="w-6 h-6 object-contain" onerror="this.style.display='none'" />
+          </div>
+        </td>
+        <td class="px-4 py-3 text-center text-xs text-gray-500">
+          {% if game.spread is not none %}
+            Home {{ "%.1f"|format(game.spread) }}
+          {% else %}TBD{% endif %}
+        </td>
+        <td class="px-4 py-3 text-center font-medium">
+          {% if game.is_final %}
+            <span class="text-xs">{{ game.away_score }}-{{ game.home_score }}</span><br/>
+            <span class="text-xs {% if game.home_covered %}text-green-600{% else %}text-blue-600{% endif %}">
+              {{ game.home_team if game.home_covered else game.away_team }} covered
+            </span>
+          {% elif game.is_in_progress %}
+            <span class="text-xs live-pulse text-green-600">{{ game.away_score }}-{{ game.home_score }} LIVE</span>
+          {% else %}
+            <span class="text-xs text-gray-400">Upcoming</span>
+          {% endif %}
+        </td>
+
+        {% for u in users %}
+        {% set pick = pick_matrix.get(u.id, {}).get(game.id) %}
+        <td class="px-3 py-3 text-center">
+          {% if pick %}
+          <div class="inline-flex flex-col items-center">
+            <span class="text-xs font-semibold
+              {% if pick.is_correct == true %}text-green-700
+              {% elif pick.is_correct == false %}text-red-600
+              {% else %}text-gray-700{% endif %}">
+              {{ pick.picked_team }}
+            </span>
+            <span class="text-xs rounded px-1 mt-0.5
+              {% if pick.is_correct == true %}bg-green-100 text-green-700
+              {% elif pick.is_correct == false %}bg-red-100 text-red-600 line-through
+              {% else %}bg-gray-100 text-gray-500{% endif %}">
+              {{ pick.confidence_points }}
+            </span>
+          </div>
+          {% else %}
+          <span class="text-gray-300 text-xs">—</span>
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot class="bg-gray-50 border-t-2">
+      <tr>
+        <td colspan="3" class="px-4 py-3 font-semibold text-sm">Total</td>
+        {% for u in users %}
+        {% set user_standings = standings|selectattr("user.id", "equalto", u.id)|first %}
+        <td class="px-3 py-3 text-center font-bold text-sm">
+          {{ user_standings.total|int if user_standings else '—' }}
+        </td>
+        {% endfor %}
+      </tr>
+    </tfoot>
+  </table>
+</div>
+
+{% if games|selectattr("is_in_progress")|list %}
+<script>setTimeout(() => window.location.reload(), 60000);</script>
+{% endif %}
+
+{% endblock %}

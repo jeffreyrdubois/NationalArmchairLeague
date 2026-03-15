@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Week {{ week.week_number }} Admin &mdash; NAL{% endblock %}
+{% block content %}
+
+<div class="flex items-center gap-3 mb-6">
+  <a href="/admin/" class="text-gray-400 hover:text-gray-600 text-sm">&larr; Admin</a>
+  <h1 class="text-2xl font-bold">{{ week.label or ('Week ' + week.week_number|string) }}</h1>
+  <div class="flex gap-2 ml-auto">
+    <form method="post" action="/admin/week/{{ week.id }}/sync">
+      <button class="bg-blue-600 text-white text-sm px-3 py-1.5 rounded hover:bg-blue-700">
+        Sync from ESPN
+      </button>
+    </form>
+    {% if not week.is_spreads_locked %}
+    <form method="post" action="/admin/week/{{ week.id }}/lock-spreads">
+      <button class="bg-orange-500 text-white text-sm px-3 py-1.5 rounded hover:bg-orange-600"
+        onclick="return confirm('Lock spreads now?')">
+        Lock Spreads
+      </button>
+    </form>
+    {% endif %}
+    {% if not week.is_picks_locked %}
+    <form method="post" action="/admin/week/{{ week.id }}/lock-picks">
+      <button class="bg-red-600 text-white text-sm px-3 py-1.5 rounded hover:bg-red-700"
+        onclick="return confirm('Lock all picks now?')">
+        Lock Picks
+      </button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="flex gap-4 mb-6">
+  <div class="text-sm px-3 py-1 rounded {% if week.is_spreads_locked %}bg-orange-100 text-orange-700{% else %}bg-green-100 text-green-700{% endif %}">
+    Spreads: {% if week.is_spreads_locked %}Locked{% else %}Open{% endif %}
+  </div>
+  <div class="text-sm px-3 py-1 rounded {% if week.is_picks_locked %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+    Picks: {% if week.is_picks_locked %}Locked{% else %}Open{% endif %}
+  </div>
+  {% if week.first_kickoff %}
+  <div class="text-sm text-gray-500">First kickoff: {{ week.first_kickoff.strftime('%a %b %-d %-I:%M%p UTC') }}</div>
+  {% endif %}
+</div>
+
+<!-- Games -->
+<div class="bg-white rounded-xl shadow p-5 mb-6">
+  <h2 class="font-semibold text-lg mb-4">Games ({{ games|length }})</h2>
+  {% if not games %}
+  <p class="text-gray-500 text-sm">No games yet. Click "Sync from ESPN" to load the schedule.</p>
+  {% else %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-xs text-gray-500 uppercase">
+        <tr>
+          <th class="text-left pb-2">Matchup</th>
+          <th class="text-left pb-2">Kickoff</th>
+          <th class="text-center pb-2">Spread (home)</th>
+          <th class="text-center pb-2">Source</th>
+          <th class="text-center pb-2">Score</th>
+          <th class="text-center pb-2">Final</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for game in games %}
+        <tr class="border-t">
+          <td class="py-2 font-medium">{{ game.away_team }} @ {{ game.home_team }}</td>
+          <td class="py-2 text-gray-500 text-xs">
+            {{ game.kickoff_time.strftime('%a %-I:%M%p') if game.kickoff_time else 'TBD' }}
+          </td>
+          <td class="py-2 text-center">
+            {% if game.spread is not none %}{{ "%.1f"|format(game.spread) }}{% else %}&mdash;{% endif %}
+          </td>
+          <td class="py-2 text-center">
+            <span class="text-xs {% if game.spread_source == 'manual' %}text-orange-600{% else %}text-gray-400{% endif %}">
+              {{ game.spread_source or '—' }}
+            </span>
+          </td>
+          <td class="py-2 text-center">
+            {% if game.home_score is not none %}
+              {{ game.away_score }}-{{ game.home_score }}
+            {% else %}&mdash;{% endif %}
+          </td>
+          <td class="py-2 text-center">
+            {% if game.is_final %}<span class="text-green-600">✓</span>{% else %}&mdash;{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Edit picks per user -->
+<div class="bg-white rounded-xl shadow p-5">
+  <h2 class="font-semibold text-lg mb-4">Edit User Picks</h2>
+  <div class="flex flex-wrap gap-2">
+    {% for u in all_users %}
+    <a href="/admin/picks/edit/{{ u.id }}/{{ week.id }}"
+      class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded text-sm font-medium">
+      {{ u.display_name }}
+    </a>
+    {% endfor %}
+  </div>
+</div>
+
+{% endblock %}

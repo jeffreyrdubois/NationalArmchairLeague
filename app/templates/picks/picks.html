@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}My Picks &mdash; {{ week.label or ('Week ' + week.week_number|string) }}{% endblock %}
+{% block content %}
+
+<div class="max-w-2xl mx-auto">
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold">{{ week.label or ('Week ' + week.week_number|string) }} Picks</h1>
+    <div class="text-sm text-gray-500">
+      {% if week.is_picks_locked %}
+        <span class="bg-red-100 text-red-700 px-2 py-1 rounded font-medium">Picks Locked</span>
+      {% elif week.first_kickoff %}
+        Locks {{ week.first_kickoff.strftime('%a %b %-d %-I:%M%p ET') }}
+      {% endif %}
+    </div>
+  </div>
+
+  {% if week.is_picks_locked %}
+  <div class="bg-yellow-50 border border-yellow-300 rounded-lg p-4 mb-6 text-sm text-yellow-800">
+    Picks are locked for this week. You can view everyone's picks below.
+    <a href="/picks/week/{{ week.id }}/all" class="font-medium underline ml-1">View all picks &rarr;</a>
+  </div>
+  {% endif %}
+
+  {% if not week.is_spreads_locked and n_games > 0 %}
+  <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-sm text-blue-700">
+    Spreads may still update until {{ week.spread_lock_time.strftime('%a %b %-d %-I:%M%p ET') if week.spread_lock_time else '24h before kickoff' }}.
+    Check back closer to game time.
+  </div>
+  {% endif %}
+
+  <form method="post" action="/picks/save" id="picks-form">
+    <input type="hidden" name="week_id" value="{{ week.id }}" />
+
+    <!-- Point assignment legend -->
+    <div class="bg-white rounded-xl shadow p-4 mb-4">
+      <p class="text-sm text-gray-600 mb-2">
+        Assign <strong>each point value once</strong> across all games.
+        Higher points = more confident. Available: {{ available_points|join(', ') }}.
+      </p>
+      <div class="flex flex-wrap gap-2" id="points-legend">
+        {% for pt in available_points %}
+        <span id="legend-{{ pt }}"
+          class="text-xs px-2 py-1 rounded border font-mono font-bold
+            {% if pt in used_points %}bg-gray-200 text-gray-400 line-through{% else %}bg-white text-gray-700{% endif %}">
+          {{ pt }}
+        </span>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% for game in games %}
+    {% set my_pick = existing_picks.get(game.id) %}
+    <div class="bg-white rounded-xl shadow mb-4 p-4">
+      <!-- Kickoff -->
+      <div class="text-xs text-gray-400 mb-3">
+        {{ game.kickoff_time.strftime('%A %b %-d &mdash; %-I:%M%p ET') if game.kickoff_time else 'Kickoff TBD' }}
+        {% if game.spread is none %}
+          <span class="ml-2 text-orange-500">Spread TBD</span>
+        {% endif %}
+      </div>
+
+      <!-- Team selector -->
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <!-- Away team -->
+        <label class="cursor-pointer">
+          <input type="radio" name="game_{{ game.id }}_team"
+            value="{{ game.away_team }}"
+            {% if my_pick and my_pick.picked_team == game.away_team %}checked{% endif %}
+            {% if week.is_picks_locked %}disabled{% endif %}
+            class="peer sr-only"
+            onchange="updateLegend()" />
+          <div class="border-2 rounded-lg p-3 text-center transition
+            peer-checked:border-blue-500 peer-checked:bg-blue-50
+            hover:border-gray-400
+            {% if week.is_picks_locked and my_pick and my_pick.picked_team == game.away_team %}border-blue-500 bg-blue-50{% endif %}">
+            <img src="{{ game.away_team_logo }}" alt="{{ game.away_team }}"
+              class="w-10 h-10 mx-auto mb-1 object-contain" onerror="this.style.display='none'" />
+            <div class="font-semibold text-sm">{{ game.away_team_name or game.away_team }}</div>
+            <div class="text-xs text-gray-500 mt-1">
+              {% if game.spread is not none %}
+                {% if game.spread > 0 %}+{{ "%.1f"|format(game.spread) }}
+                {% elif game.spread < 0 %}Fav -{{ "%.1f"|format(-game.spread) }}
+                {% else %}PK{% endif %}
+              {% else %}Spread TBD{% endif %}
+            </div>
+          </div>
+        </label>
+
+        <!-- Home team -->
+        <label class="cursor-pointer">
+          <input type="radio" name="game_{{ game.id }}_team"
+            value="{{ game.home_team }}"
+            {% if my_pick and my_pick.picked_team == game.home_team %}checked{% endif %}
+            {% if week.is_picks_locked %}disabled{% endif %}
+            class="peer sr-only"
+            onchange="updateLegend()" />
+          <div class="border-2 rounded-lg p-3 text-center transition
+            peer-checked:border-blue-500 peer-checked:bg-blue-50
+            hover:border-gray-400
+            {% if week.is_picks_locked and my_pick and my_pick.picked_team == game.home_team %}border-blue-500 bg-blue-50{% endif %}">
+            <img src="{{ game.home_team_logo }}" alt="{{ game.home_team }}"
+              class="w-10 h-10 mx-auto mb-1 object-contain" onerror="this.style.display='none'" />
+            <div class="font-semibold text-sm">{{ game.home_team_name or game.home_team }}</div>
+            <div class="text-xs text-gray-500 mt-1">
+              {% if game.spread is not none %}
+                {% if game.spread < 0 %}Fav -{{ "%.1f"|format(-game.spread) }}
+                {% elif game.spread > 0 %}+{{ "%.1f"|format(game.spread) }}
+                {% else %}PK{% endif %}
+              {% else %}Spread TBD{% endif %}
+            </div>
+          </div>
+        </label>
+      </div>
+
+      <!-- Points selector -->
+      <div>
+        <label class="text-xs font-medium text-gray-600 mb-1 block">Confidence Points</label>
+        <select name="game_{{ game.id }}_points"
+          {% if week.is_picks_locked %}disabled{% endif %}
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
+          onchange="updateLegend()">
+          <option value="">-- Select points --</option>
+          {% for pt in available_points %}
+          <option value="{{ pt }}" {% if my_pick and my_pick.confidence_points == pt %}selected{% endif %}>
+            {{ pt }} point{% if pt != 1 %}s{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    {% endfor %}
+
+    {% if not week.is_picks_locked %}
+    <div class="sticky bottom-4">
+      <button type="submit" id="submit-btn"
+        class="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-3 rounded-xl shadow-lg transition text-lg">
+        Save All Picks
+      </button>
+    </div>
+    {% endif %}
+  </form>
+</div>
+
+<script>
+function updateLegend() {
+  const form = document.getElementById('picks-form');
+  const usedPoints = new Set();
+
+  // Collect all selected points
+  form.querySelectorAll('select[name$="_points"]').forEach(sel => {
+    if (sel.value) usedPoints.add(parseInt(sel.value));
+  });
+
+  // Update legend display
+  document.querySelectorAll('[id^="legend-"]').forEach(el => {
+    const pt = parseInt(el.id.replace('legend-', ''));
+    if (usedPoints.has(pt)) {
+      el.classList.add('bg-blue-100', 'text-blue-700', 'border-blue-400');
+      el.classList.remove('bg-white', 'text-gray-700', 'line-through', 'bg-gray-200', 'text-gray-400');
+    } else {
+      el.classList.remove('bg-blue-100', 'text-blue-700', 'border-blue-400', 'line-through', 'bg-gray-200', 'text-gray-400');
+      el.classList.add('bg-white', 'text-gray-700');
+    }
+  });
+}
+
+// Validate before submit: all picks entered and no duplicates
+document.getElementById('picks-form')?.addEventListener('submit', function(e) {
+  const form = e.target;
+  const points = [];
+  let hasError = false;
+
+  form.querySelectorAll('select[name$="_points"]').forEach(sel => {
+    if (!sel.value) { hasError = true; return; }
+    points.push(sel.value);
+  });
+
+  form.querySelectorAll('input[type="radio"][name$="_team"]').forEach(radio => {
+    // Check each game has a selection
+  });
+
+  // Check all radio groups have a selection
+  const gameIds = new Set();
+  form.querySelectorAll('select[name$="_points"]').forEach(sel => {
+    const gameId = sel.name.replace('game_', '').replace('_points', '');
+    const checked = form.querySelector(`input[name="game_${gameId}_team"]:checked`);
+    if (!checked) {
+      hasError = true;
+      gameIds.add(gameId);
+    }
+  });
+
+  const dupes = points.length !== new Set(points).size;
+
+  if (hasError || dupes) {
+    e.preventDefault();
+    alert(dupes
+      ? 'Each point value can only be used once. Please fix duplicates.'
+      : 'Please make a pick for every game before saving.');
+  }
+});
+
+updateLegend();
+</script>
+
+{% endblock %}

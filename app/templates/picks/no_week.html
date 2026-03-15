@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="text-center mt-20">
+  <p class="text-xl text-gray-500">No active week right now. Enjoy the bye!</p>
+  {% if user and user.role == 'admin' %}
+  <a href="/admin/" class="mt-4 inline-block bg-yellow-400 text-gray-900 font-bold px-4 py-2 rounded-lg">
+    Set up a week
+  </a>
+  {% endif %}
+</div>
+{% endblock %}

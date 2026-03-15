@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Dashboard &mdash; NAL{% endblock %}
+{% block content %}
+
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-bold">
+    {{ season.year }} Season
+    {% if current_week %}&mdash; {{ current_week.label or ('Week ' + current_week.week_number|string) }}{% endif %}
+  </h1>
+  {% if current_week and not current_week.is_picks_locked %}
+  <a href="/picks" class="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold px-4 py-2 rounded-lg transition">
+    Enter My Picks
+  </a>
+  {% endif %}
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+  <!-- Current week games -->
+  <div class="lg:col-span-2">
+    <div class="bg-white rounded-xl shadow p-5">
+      <h2 class="font-semibold text-lg mb-4">
+        {% if current_week %}{{ current_week.label or ('Week ' + current_week.week_number|string) }} Games{% else %}No Active Week{% endif %}
+      </h2>
+
+      {% if not current_games %}
+        <p class="text-gray-500 text-sm">No games scheduled yet. Check back soon.</p>
+      {% else %}
+        {% for game in current_games %}
+        {% set my_pick = my_picks.get(game.id) %}
+        <div class="border rounded-lg mb-3 p-3
+          {% if my_pick and my_pick.is_correct == true %}pick-correct
+          {% elif my_pick and my_pick.is_correct == false %}pick-wrong
+          {% elif my_pick %}pick-pending{% endif %}">
+          <div class="flex items-center justify-between">
+            <!-- Away team -->
+            <div class="flex items-center gap-2 w-5/12">
+              <img src="{{ game.away_team_logo }}" alt="{{ game.away_team }}" class="w-8 h-8 object-contain" onerror="this.style.display='none'"/>
+              <div>
+                <div class="font-semibold text-sm">{{ game.away_team_name or game.away_team }}</div>
+                {% if game.spread is not none %}
+                <div class="text-xs text-gray-500">
+                  {% if game.spread > 0 %}+{{ "%.1f"|format(game.spread) }}
+                  {% elif game.spread < 0 %}{{ "%.1f"|format(-game.spread) }} fav
+                  {% else %}PK{% endif %}
+                </div>
+                {% endif %}
+              </div>
+            </div>
+
+            <!-- Score / Status -->
+            <div class="text-center w-2/12">
+              {% if game.is_final %}
+                <div class="font-bold">{{ game.away_score }} - {{ game.home_score }}</div>
+                <div class="text-xs text-gray-500">Final</div>
+              {% elif game.is_in_progress %}
+                <div class="font-bold live-pulse text-green-600">{{ game.away_score }} - {{ game.home_score }}</div>
+                <div class="text-xs text-green-600">Q{{ game.quarter }} {{ game.time_remaining }}</div>
+              {% else %}
+                <div class="text-xs text-gray-500">
+                  {{ game.kickoff_time.strftime('%a %-I:%M%p') if game.kickoff_time else 'TBD' }}
+                </div>
+                <div class="text-xs font-medium text-gray-400">vs</div>
+              {% endif %}
+            </div>
+
+            <!-- Home team -->
+            <div class="flex items-center gap-2 w-5/12 justify-end text-right">
+              <div>
+                <div class="font-semibold text-sm">{{ game.home_team_name or game.home_team }}</div>
+                {% if game.spread is not none %}
+                <div class="text-xs text-gray-500">
+                  {% if game.spread < 0 %}{{ "%.1f"|format(game.spread) }} fav
+                  {% elif game.spread > 0 %}+{{ "%.1f"|format(-game.spread) }}
+                  {% else %}PK{% endif %}
+                </div>
+                {% endif %}
+              </div>
+              <img src="{{ game.home_team_logo }}" alt="{{ game.home_team }}" class="w-8 h-8 object-contain" onerror="this.style.display='none'"/>
+            </div>
+          </div>
+
+          <!-- My pick indicator -->
+          {% if my_pick %}
+          <div class="mt-2 text-xs text-gray-600 flex justify-between">
+            <span>My pick: <strong>{{ my_pick.picked_team }}</strong></span>
+            <span>{{ my_pick.confidence_points }} pts
+              {% if my_pick.is_correct == true %} &mdash; Won {{ my_pick.points_earned|int }}!
+              {% elif my_pick.is_correct == false %} &mdash; Lost
+              {% endif %}
+            </span>
+          </div>
+          {% elif current_week and not current_week.is_picks_locked and game.spread is not none %}
+          <div class="mt-2 text-xs text-yellow-600 font-medium">No pick entered yet</div>
+          {% elif game.spread is none %}
+          <div class="mt-2 text-xs text-gray-400 italic">Spread not yet available</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      {% endif %}
+
+      {% if current_week and current_week.is_picks_locked %}
+      <a href="/picks/week/{{ current_week.id }}/all"
+        class="block text-center mt-4 text-sm text-blue-600 hover:underline">
+        View all picks &rarr;
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Sidebar: standings -->
+  <div class="space-y-6">
+
+    <!-- This week -->
+    {% if week_standings %}
+    <div class="bg-white rounded-xl shadow p-5">
+      <h2 class="font-semibold text-lg mb-3">This Week</h2>
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase">
+            <th class="text-left pb-2">#</th>
+            <th class="text-left pb-2">Player</th>
+            <th class="text-right pb-2">Pts</th>
+            <th class="text-right pb-2">W-L</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for i, row in week_standings|enumerate %}
+          <tr class="border-t {% if row.user.id == user.id %}bg-yellow-50{% endif %}">
+            <td class="py-2 text-gray-400">{{ i + 1 }}</td>
+            <td class="py-2">
+              <a href="/profile/{{ row.user.username }}" class="hover:underline font-medium">
+                {{ row.user.display_name }}
+              </a>
+            </td>
+            <td class="py-2 text-right font-bold">{{ row.total|int }}</td>
+            <td class="py-2 text-right text-gray-500">{{ row.correct }}-{{ row.wrong }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- Season standings -->
+    <div class="bg-white rounded-xl shadow p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-lg">Season Standings</h2>
+        <a href="/standings" class="text-xs text-blue-600 hover:underline">Full view</a>
+      </div>
+      {% if not season_standings %}
+        <p class="text-sm text-gray-500">No picks recorded yet.</p>
+      {% else %}
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase">
+            <th class="text-left pb-2">#</th>
+            <th class="text-left pb-2">Player</th>
+            <th class="text-right pb-2">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for i, row in season_standings|enumerate %}
+          <tr class="border-t {% if row.user.id == user.id %}bg-yellow-50{% endif %}">
+            <td class="py-2 text-gray-400">{{ i + 1 }}</td>
+            <td class="py-2">
+              <a href="/profile/{{ row.user.username }}" class="hover:underline font-medium">
+                {{ row.user.display_name }}
+              </a>
+            </td>
+            <td class="py-2 text-right font-bold">{{ row.total|int }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+<!-- Auto-refresh during live games -->
+{% if current_games and current_games|selectattr("is_in_progress")|list %}
+<script>
+  setTimeout(() => window.location.reload(), 60000);
+</script>
+{% endif %}
+
+{% endblock %}
