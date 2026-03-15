@@ -22,7 +22,9 @@
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
         <div class="flex items-center gap-6">
-          <a href="/" class="text-xl font-bold tracking-tight text-yellow-400">NAL</a>
+          <a href="/" class="flex items-center gap-2">
+            <img src="/static/images/nal-logo.png" alt="NAL" class="h-10 w-auto" />
+          </a>
           {% if user %}
           <a href="/" class="text-sm hover:text-yellow-300 transition">Dashboard</a>
           <a href="/picks" class="text-sm hover:text-yellow-300 transition">My Picks</a>
@@ -43,8 +45,8 @@
         </div>
         <div class="flex items-center gap-4">
           {% if user %}
-          <a href="/profile/{{ user.username }}" class="text-sm text-gray-300 hover:text-white">
-            {{ user.display_name }}
+          <a href="/profile/{{ user.id }}" class="text-sm text-gray-300 hover:text-white">
+            {{ user.first_name }} {{ user.last_name }}
             <span class="ml-1 text-xs px-1.5 py-0.5 rounded
               {% if user.role == 'admin' %}bg-red-600
               {% elif user.role == 'contributor' %}bg-blue-600

@@ -185,7 +185,7 @@ async def admin_home(request: Request, db: Session = Depends(get_db)):
         return RedirectResponse(url="/", status_code=303)
 
     seasons = db.query(Season).order_by(Season.year.desc()).all()
-    users = db.query(User).order_by(User.username).all()
+    users = db.query(User).order_by(User.last_name, User.first_name).all()
     recent_logs = (
         db.query(AuditLog)
         .order_by(AuditLog.created_at.desc())
@@ -426,7 +426,7 @@ async def save_user_picks(
             action="edit_pick",
             target_type="pick",
             target_id=game_id,
-            detail=detail + f" for user {target_user.username}",
+            detail=detail + f" for user {target_user.full_name}",
         )
         db.add(log)
 
@@ -440,7 +440,7 @@ async def users_page(request: Request, db: Session = Depends(get_db)):
     if not user or user.role != Role.admin:
         return RedirectResponse(url="/", status_code=303)
 
-    users = db.query(User).order_by(User.username).all()
+    users = db.query(User).order_by(User.last_name, User.first_name).all()
     return templates.TemplateResponse(
         "admin/users.html",
         {"request": request, "user": user, "users": users, "roles": Role},

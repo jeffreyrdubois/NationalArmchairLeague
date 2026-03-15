@@ -23,7 +23,7 @@
         {% for i, row in standings|enumerate %}
         <tr class="border-t {% if row.user.id == user.id %}bg-yellow-50{% endif %}">
           <td class="py-2 pr-4 text-gray-400">{{ i + 1 }}</td>
-          <td class="py-2 pr-4 font-medium">{{ row.user.display_name }}</td>
+          <td class="py-2 pr-4 font-medium">{{ row.user.first_name }} {{ row.user.last_name }}</td>
           <td class="py-2 pr-4 text-right font-bold">{{ row.total|int }}</td>
           <td class="py-2 pr-4 text-right text-green-600">{{ row.correct }}</td>
           <td class="py-2 text-right text-yellow-600">{{ row.pending }}</td>
@@ -44,8 +44,8 @@
         <th class="text-center px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Result</th>
         {% for u in users %}
         <th class="text-center px-3 py-3 font-medium text-gray-600 whitespace-nowrap">
-          <a href="/profile/{{ u.username }}" class="hover:underline">
-            {{ u.display_name.split(' ')[0] }}
+          <a href="/profile/{{ u.id }}" class="hover:underline">
+            {{ u.first_name }}
           </a>
         </th>
         {% endfor %}

@@ -39,8 +39,8 @@
             {% else %}<span class="text-gray-400">{{ i + 1 }}</span>{% endif %}
           </td>
           <td class="py-3 pr-6">
-            <a href="/profile/{{ row.user.username }}" class="font-semibold hover:underline">
-              {{ row.user.display_name }}
+            <a href="/profile/{{ row.user.id }}" class="font-semibold hover:underline">
+              {{ row.user.first_name }} {{ row.user.last_name }}
             </a>
           </td>
           <td class="py-3 pr-6 text-right font-bold text-lg">{{ row.total|int }}</td>
@@ -75,7 +75,7 @@
       {% for i, row in wd.standings|enumerate %}
       <div class="text-center min-w-16">
         <div class="text-xs text-gray-400">#{{ i + 1 }}</div>
-        <div class="text-sm font-medium">{{ row.user.display_name.split(' ')[0] }}</div>
+        <div class="text-sm font-medium">{{ row.user.first_name }}</div>
         <div class="font-bold text-lg {% if i == 0 %}text-yellow-500{% endif %}">{{ row.total|int }}</div>
         <div class="text-xs text-gray-400">{{ row.correct }}-{{ row.wrong }}</div>
       </div>

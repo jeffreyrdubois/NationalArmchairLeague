@@ -135,10 +135,10 @@ async def standings_page(
     )
 
 
-@router.get("/profile/{username}", response_class=HTMLResponse)
+@router.get("/profile/{user_id}", response_class=HTMLResponse)
 async def user_profile(
     request: Request,
-    username: str,
+    user_id: int,
     season_year: int = None,
     db: Session = Depends(get_db),
 ):
@@ -146,7 +146,7 @@ async def user_profile(
     if not user:
         return RedirectResponse(url="/login", status_code=303)
 
-    profile_user = db.query(User).filter(User.username == username).first()
+    profile_user = db.query(User).filter(User.id == user_id).first()
     if not profile_user:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="User not found")
