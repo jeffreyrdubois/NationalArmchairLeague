@@ -402,6 +402,43 @@ async def create_season(
     return RedirectResponse(url="/admin/", status_code=303)
 
 
+@router.post("/season/{season_id}/activate")
+async def activate_season(request: Request, season_id: int, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    season = db.query(Season).filter(Season.id == season_id).first()
+    if not season:
+        raise HTTPException(status_code=404)
+
+    db.query(Season).update({"is_active": False})
+    season.is_active = True
+    log = AuditLog(user_id=user.id, action="activate_season", target_type="season",
+                   target_id=season.id, detail=f"Activated season {season.year}")
+    db.add(log)
+    db.commit()
+    return RedirectResponse(url="/admin/", status_code=303)
+
+
+@router.post("/season/{season_id}/deactivate")
+async def deactivate_season(request: Request, season_id: int, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    season = db.query(Season).filter(Season.id == season_id).first()
+    if not season:
+        raise HTTPException(status_code=404)
+
+    season.is_active = False
+    log = AuditLog(user_id=user.id, action="deactivate_season", target_type="season",
+                   target_id=season.id, detail=f"Deactivated season {season.year}")
+    db.add(log)
+    db.commit()
+    return RedirectResponse(url="/admin/", status_code=303)
+
+
 @router.get("/week/{week_id}", response_class=HTMLResponse)
 async def week_admin(request: Request, week_id: int, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
