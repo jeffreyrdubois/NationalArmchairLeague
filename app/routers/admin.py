@@ -695,9 +695,10 @@ async def users_page(request: Request, db: Session = Depends(get_db)):
 
     users = db.query(User).order_by(User.last_name, User.first_name).all()
     error = request.query_params.get("error")
+    msg = request.query_params.get("msg")
     return templates.TemplateResponse(
         "admin/users.html",
-        {"request": request, "user": user, "users": users, "roles": Role, "error": error},
+        {"request": request, "user": user, "users": users, "roles": Role, "error": error, "msg": msg},
     )
 
 
@@ -787,3 +788,32 @@ async def toggle_user(
     target.is_active = not target.is_active
     db.commit()
     return RedirectResponse(url="/admin/users", status_code=303)
+
+
+@router.post("/users/{user_id}/reset-password")
+async def reset_user_password(
+    request: Request,
+    user_id: int,
+    new_password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404)
+    if len(new_password) < 8:
+        return RedirectResponse(url="/admin/users?error=Password+must+be+at+least+8+characters", status_code=303)
+
+    target.password_hash = hash_password(new_password)
+    db.add(AuditLog(
+        user_id=user.id,
+        action="reset_password",
+        target_type="user",
+        target_id=user_id,
+        detail=f"Password reset for {target.full_name}",
+    ))
+    db.commit()
+    return RedirectResponse(url="/admin/users?msg=Password+reset+successfully", status_code=303)

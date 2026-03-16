@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Account Settings &mdash; NAL{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">Account Settings</h1>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+  <!-- ── Notifications ── -->
+  <div class="bg-white rounded-xl shadow p-5">
+    <h2 class="font-semibold text-base mb-4">Notification Preferences</h2>
+    <form method="post" action="/settings/notifications">
+      <div class="space-y-4">
+
+        <label class="flex items-start gap-3 cursor-pointer">
+          <div class="mt-0.5">
+            <input type="checkbox" name="notif_picks_reminder" value="on"
+              {% if user.notif_picks_reminder %}checked{% endif %}
+              class="w-4 h-4 rounded accent-yellow-400" />
+          </div>
+          <div>
+            <div class="text-sm font-medium">Picks reminder</div>
+            <div class="text-xs text-gray-500">
+              Get a push notification 2 hours before picks lock each week.
+            </div>
+          </div>
+        </label>
+
+        <label class="flex items-start gap-3 cursor-pointer">
+          <div class="mt-0.5">
+            <input type="checkbox" name="notif_week_results" value="on"
+              {% if user.notif_week_results %}checked{% endif %}
+              class="w-4 h-4 rounded accent-yellow-400" />
+          </div>
+          <div>
+            <div class="text-sm font-medium">Week results</div>
+            <div class="text-xs text-gray-500">
+              Get a push notification when all games are scored and the standings update.
+            </div>
+          </div>
+        </label>
+
+      </div>
+      <button class="mt-5 bg-gray-900 text-white text-sm px-4 py-2 rounded hover:bg-gray-700">
+        Save Preferences
+      </button>
+    </form>
+  </div>
+
+  <!-- ── Browser Push Notifications ── -->
+  <div class="bg-white rounded-xl shadow p-5">
+    <h2 class="font-semibold text-base mb-1">Browser Push Notifications</h2>
+    <p class="text-xs text-gray-500 mb-4">
+      Enable push notifications in this browser to receive alerts even when NAL
+      isn't open. Each device/browser you use registers separately.
+    </p>
+
+    <div id="push-status" class="text-sm text-gray-500 mb-3">Checking browser support…</div>
+
+    <div class="flex gap-2 flex-wrap">
+      <button id="btn-enable-push"
+        class="hidden bg-yellow-400 text-gray-900 text-sm px-4 py-2 rounded font-medium hover:bg-yellow-300">
+        Enable for this browser
+      </button>
+      <button id="btn-disable-push"
+        class="hidden bg-gray-200 text-gray-700 text-sm px-4 py-2 rounded hover:bg-gray-300">
+        Remove this browser
+      </button>
+    </div>
+
+    {% if subscriptions %}
+    <div class="mt-5">
+      <div class="text-xs font-medium text-gray-500 uppercase mb-2">
+        Active subscriptions ({{ subscriptions | length }})
+      </div>
+      <ul class="space-y-1">
+        {% for sub in subscriptions %}
+        <li class="text-xs text-gray-400 truncate" title="{{ sub.endpoint }}">
+          Registered {{ sub.created_at.strftime('%b %-d, %Y') if sub.created_at else '' }}
+          &mdash; {{ sub.endpoint[:60] }}…
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ── Change Password ── -->
+  <div class="bg-white rounded-xl shadow p-5 lg:col-span-2 max-w-lg">
+    <h2 class="font-semibold text-base mb-4">Change Password</h2>
+    <form method="post" action="/settings/change-password" class="space-y-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Current Password</label>
+        <input type="password" name="current_password" required autocomplete="current-password"
+          class="w-full border rounded px-3 py-1.5 text-sm" />
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">New Password</label>
+        <input type="password" name="new_password" required minlength="8" autocomplete="new-password"
+          class="w-full border rounded px-3 py-1.5 text-sm" />
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Confirm New Password</label>
+        <input type="password" name="confirm_password" required autocomplete="new-password"
+          class="w-full border rounded px-3 py-1.5 text-sm" />
+      </div>
+      <button class="bg-gray-900 text-white text-sm px-4 py-2 rounded hover:bg-gray-700">
+        Change Password
+      </button>
+    </form>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  var statusEl  = document.getElementById('push-status');
+  var btnEnable  = document.getElementById('btn-enable-push');
+  var btnDisable = document.getElementById('btn-disable-push');
+
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    statusEl.textContent = 'Push notifications are not supported by this browser.';
+    return;
+  }
+
+  function urlBase64ToUint8Array(b64) {
+    var pad = '='.repeat((4 - b64.length % 4) % 4);
+    var b64s = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+    var raw = window.atob(b64s);
+    return Uint8Array.from(Array.from(raw).map(function(c){ return c.charCodeAt(0); }));
+  }
+
+  async function getRegistration() {
+    return navigator.serviceWorker.register('/static/js/sw.js');
+  }
+
+  async function checkState() {
+    var perm = Notification.permission;
+    var reg = await getRegistration();
+    var sub = await reg.pushManager.getSubscription();
+
+    if (perm === 'denied') {
+      statusEl.textContent = 'Notifications are blocked in your browser settings. Change them there to enable.';
+      return;
+    }
+    if (sub) {
+      statusEl.textContent = 'Push notifications are enabled for this browser.';
+      btnDisable.classList.remove('hidden');
+    } else {
+      statusEl.textContent = perm === 'granted'
+        ? 'Push notifications are not yet subscribed for this browser.'
+        : 'Click below to enable push notifications for this browser.';
+      btnEnable.classList.remove('hidden');
+    }
+  }
+
+  btnEnable.addEventListener('click', async function () {
+    try {
+      var keyResp = await fetch('/push/vapid-public-key');
+      var vapidKey = await keyResp.text();
+      var reg = await getRegistration();
+      var sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      });
+      await fetch('/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sub.toJSON()),
+      });
+      // Reload so the subscription list reflects the new entry
+      window.location.href = '/settings?msg=Push+notifications+enabled+for+this+browser';
+    } catch (e) {
+      statusEl.textContent = 'Could not enable notifications: ' + e.message;
+    }
+  });
+
+  btnDisable.addEventListener('click', async function () {
+    var reg = await getRegistration();
+    var sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      await fetch('/push/unsubscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: sub.endpoint }),
+      });
+      await sub.unsubscribe();
+    }
+    window.location.href = '/settings?msg=Push+notifications+removed+for+this+browser';
+  });
+
+  checkState();
+})();
+</script>
+{% endblock %}

@@ -13,6 +13,9 @@
   {% if error %}
   <p class="text-sm text-red-600 mb-3">{{ error }}</p>
   {% endif %}
+  {% if msg %}
+  <p class="text-sm text-green-600 mb-3">{{ msg }}</p>
+  {% endif %}
   <form method="post" action="/admin/users/add" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
     <div>
       <label class="block text-xs text-gray-500 mb-1">First Name</label>
@@ -79,13 +82,33 @@
           </span>
         </td>
         <td class="px-4 py-3 text-center">
-          {% if u.id != user.id %}
-          <form method="post" action="/admin/users/{{ u.id }}/toggle" class="inline">
-            <button class="text-xs px-2 py-1 rounded border hover:bg-gray-100">
-              {% if u.is_active %}Disable{% else %}Enable{% endif %}
-            </button>
-          </form>
-          {% endif %}
+          <div class="flex items-center justify-center gap-2 flex-wrap">
+            {% if u.id != user.id %}
+            <form method="post" action="/admin/users/{{ u.id }}/toggle" class="inline">
+              <button class="text-xs px-2 py-1 rounded border hover:bg-gray-100">
+                {% if u.is_active %}Disable{% else %}Enable{% endif %}
+              </button>
+            </form>
+            {% endif %}
+            <!-- Reset password (inline expand) -->
+            <details class="inline relative">
+              <summary class="text-xs px-2 py-1 rounded border hover:bg-gray-100 cursor-pointer list-none">
+                Reset PW
+              </summary>
+              <div class="absolute right-0 z-10 mt-1 bg-white border rounded shadow-lg p-3 w-56">
+                <form method="post" action="/admin/users/{{ u.id }}/reset-password"
+                  class="flex flex-col gap-2">
+                  <label class="text-xs text-gray-500">New password (min 8 chars)</label>
+                  <input type="text" name="new_password" required minlength="8"
+                    placeholder="temporary password"
+                    class="border rounded px-2 py-1 text-xs w-full" />
+                  <button class="bg-gray-900 text-white text-xs px-2 py-1 rounded hover:bg-gray-700">
+                    Set Password
+                  </button>
+                </form>
+              </div>
+            </details>
+          </div>
         </td>
       </tr>
       {% endfor %}

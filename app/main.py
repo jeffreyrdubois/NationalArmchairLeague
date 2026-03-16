@@ -7,7 +7,9 @@ import logging
 
 from app.database import init_db
 from app.routers import auth, picks, dashboard, admin
+from app.routers import push
 from app.services.scheduler import setup_scheduler, scheduler
+from app.services.notifications import init_vapid_keys
 from app.templates_config import templates
 
 logging.basicConfig(level=logging.INFO)
@@ -18,6 +20,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized")
+    init_vapid_keys()
     setup_scheduler()
     yield
     scheduler.shutdown()
@@ -34,6 +37,7 @@ app.include_router(auth.router)
 app.include_router(picks.router)
 app.include_router(dashboard.router)
 app.include_router(admin.router)
+app.include_router(push.router)
 
 
 # Custom 401/403 → redirect to login
