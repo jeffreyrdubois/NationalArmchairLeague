@@ -4,6 +4,29 @@
 
 <h1 class="text-2xl font-bold mb-6">Admin Panel</h1>
 
+<!-- Test Data -->
+<div class="bg-amber-50 border border-amber-300 rounded-xl p-5 mb-8">
+  <h2 class="font-semibold text-lg mb-1 text-amber-800">Test Data</h2>
+  <p class="text-sm text-amber-700 mb-4">
+    Creates a fake season (year 9999) with an open week you can enter picks on,
+    and a completed week with scores and standings already populated.
+    Safe to re-run — replaces existing test data each time.
+  </p>
+  <div class="flex gap-3">
+    <form method="post" action="/admin/test-season/create">
+      <button class="bg-amber-400 hover:bg-amber-300 text-gray-900 font-bold px-4 py-2 rounded-lg text-sm">
+        Seed Test Season
+      </button>
+    </form>
+    <form method="post" action="/admin/test-season/delete"
+      onsubmit="return confirm('Delete the test season and all its data?')">
+      <button class="bg-white border border-red-300 text-red-600 hover:bg-red-50 font-medium px-4 py-2 rounded-lg text-sm">
+        Delete Test Season
+      </button>
+    </form>
+  </div>
+</div>
+
 <div class="bg-white rounded-xl shadow p-5 mb-8">
   <h2 class="font-semibold text-lg mb-4">Seasons</h2>
   <form method="post" action="/admin/season/create" class="flex gap-2 mb-5">
