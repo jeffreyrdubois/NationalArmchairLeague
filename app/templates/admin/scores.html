@@ -2,33 +2,64 @@
 {% block title %}Manage Scores &mdash; NAL{% endblock %}
 {% block content %}
 
-<h1 class="text-2xl font-bold mb-6">Manage Scores</h1>
-<p class="text-sm text-gray-500 mb-6">Use this only if automatic score fetching is failing. Scores are normally updated every 5 minutes.</p>
+<h1 class="text-2xl font-bold mb-2">Manage Scores</h1>
+<p class="text-sm text-gray-500 mb-6">Use this to enter or correct scores for any week. Marking a game Final triggers pick scoring automatically.</p>
+
+{% if not weeks %}
+<p class="text-gray-500">No active season.</p>
+{% else %}
+
+<!-- Week selector -->
+<div class="mb-5 flex flex-wrap gap-2">
+  {% for w in weeks %}
+  <a href="/admin/scores?week_id={{ w.id }}"
+     class="px-3 py-1.5 rounded text-sm font-medium border transition
+       {% if current_week and w.id == current_week.id %}
+         bg-gray-900 text-white border-gray-900
+       {% else %}
+         bg-white text-gray-700 border-gray-300 hover:border-gray-500
+       {% endif %}">
+    {{ w.label or ('Week ' + w.week_number|string) }}
+    {% if w.is_completed %}
+    <span class="ml-1 text-xs opacity-60">✓</span>
+    {% endif %}
+  </a>
+  {% endfor %}
+</div>
 
 {% if not current_week %}
-<p class="text-gray-500">No active week.</p>
+<p class="text-gray-500">Select a week above.</p>
+{% elif not games %}
+<p class="text-gray-500 text-sm">No games for this week yet. <a href="/admin/week/{{ current_week.id }}" class="text-blue-600 underline">Sync from nflverse</a> first.</p>
 {% else %}
-<h2 class="font-semibold text-lg mb-4">{{ current_week.label or ('Week ' + current_week.week_number|string) }}</h2>
+
+<div class="flex items-center gap-3 mb-4">
+  <h2 class="font-semibold text-lg">{{ current_week.label or ('Week ' + current_week.week_number|string) }}</h2>
+  {% if current_week.is_completed %}
+  <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Completed</span>
+  {% endif %}
+</div>
 
 <div class="space-y-3">
   {% for game in games %}
   <div class="bg-white rounded-xl shadow p-4">
     <div class="flex items-center justify-between mb-3">
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-3 flex-wrap">
         <img src="{{ game.away_team_logo }}" class="w-8 h-8 object-contain" onerror="this.style.display='none'" />
         <span class="font-medium">{{ game.away_team_name or game.away_team }}</span>
         <span class="text-gray-400">@</span>
         <span class="font-medium">{{ game.home_team_name or game.home_team }}</span>
         <img src="{{ game.home_team_logo }}" class="w-8 h-8 object-contain" onerror="this.style.display='none'" />
       </div>
-      <div class="text-sm text-gray-500">
-        {{ game.kickoff_time.strftime('%-I:%M%p ET') if game.kickoff_time else '' }}
+      <div class="text-sm text-gray-500 shrink-0">
+        {{ game.kickoff_time.strftime('%-m/%-d %I:%M%p ET') if game.kickoff_time else '' }}
         {% if game.is_final %}<span class="ml-2 text-green-600 font-medium">Final</span>
         {% elif game.is_in_progress %}<span class="ml-2 text-green-600 live-pulse">Live</span>{% endif %}
       </div>
     </div>
-    <form method="post" action="/admin/scores/update" class="flex items-center gap-3">
+    <form method="post" action="/admin/scores/update" class="flex flex-wrap items-center gap-3">
       <input type="hidden" name="game_id" value="{{ game.id }}" />
+      <input type="hidden" name="redirect_week_id" value="{{ current_week.id }}" />
       <label class="text-sm text-gray-600">{{ game.away_team }}</label>
       <input name="away_score" type="number" min="0"
         value="{{ game.away_score if game.away_score is not none else '' }}"
@@ -46,6 +77,8 @@
   </div>
   {% endfor %}
 </div>
+
+{% endif %}
 {% endif %}
 
 {% endblock %}
