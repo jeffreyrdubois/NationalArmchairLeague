@@ -185,6 +185,14 @@ async def admin_home(request: Request, db: Session = Depends(get_db)):
         return RedirectResponse(url="/", status_code=303)
 
     seasons = db.query(Season).order_by(Season.year.desc()).all()
+    season_weeks = {}
+    for season in seasons:
+        season_weeks[season.id] = (
+            db.query(Week)
+            .filter(Week.season_id == season.id)
+            .order_by(Week.week_number)
+            .all()
+        )
     users = db.query(User).order_by(User.last_name, User.first_name).all()
     recent_logs = (
         db.query(AuditLog)
@@ -199,6 +207,7 @@ async def admin_home(request: Request, db: Session = Depends(get_db)):
             "request": request,
             "user": user,
             "seasons": seasons,
+            "season_weeks": season_weeks,
             "users": users,
             "recent_logs": recent_logs,
         },
@@ -227,43 +236,22 @@ async def create_season(
     db.commit()
     db.refresh(season)
 
+    # Auto-create all 18 regular season weeks
+    for n in range(1, 19):
+        week = Week(
+            season_id=season.id,
+            week_number=n,
+            label=f"Week {n}",
+            espn_week=n,
+        )
+        db.add(week)
+
     log = AuditLog(user_id=user.id, action="create_season", target_type="season",
-                   target_id=season.id, detail=f"Created season {year}")
+                   target_id=season.id, detail=f"Created season {year} with 18 weeks")
     db.add(log)
     db.commit()
 
     return RedirectResponse(url="/admin/", status_code=303)
-
-
-@router.post("/week/create")
-async def create_week(
-    request: Request,
-    season_id: int = Form(...),
-    week_number: int = Form(...),
-    label: str = Form(""),
-    espn_week: int = Form(None),
-    db: Session = Depends(get_db),
-):
-    user = get_current_user(request, db)
-    if not user or user.role != Role.admin:
-        raise HTTPException(status_code=403)
-
-    week = Week(
-        season_id=season_id,
-        week_number=week_number,
-        label=label or f"Week {week_number}",
-        espn_week=espn_week or week_number,
-    )
-    db.add(week)
-    db.commit()
-    db.refresh(week)
-
-    log = AuditLog(user_id=user.id, action="create_week", target_type="week",
-                   target_id=week.id, detail=f"Created week {week_number} for season {season_id}")
-    db.add(log)
-    db.commit()
-
-    return RedirectResponse(url=f"/admin/week/{week.id}", status_code=303)
 
 
 @router.get("/week/{week_id}", response_class=HTMLResponse)
