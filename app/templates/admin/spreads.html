@@ -2,19 +2,45 @@
 {% block title %}Manage Spreads &mdash; NAL{% endblock %}
 {% block content %}
 
-<h1 class="text-2xl font-bold mb-6">Manage Spreads</h1>
+<h1 class="text-2xl font-bold mb-2">Manage Spreads</h1>
+<p class="text-sm text-gray-500 mb-6">Enter the home-team spread for each game. Negative = home favored, positive = away favored.</p>
 
-{% if selected_week %}
-<div class="mb-4 flex gap-2 items-center">
-  <span class="text-sm font-medium">{{ selected_week.label or ('Week ' + selected_week.week_number|string) }}</span>
+{% if not weeks %}
+<p class="text-gray-500">No active season.</p>
+{% else %}
+
+<!-- Week selector -->
+<div class="mb-5 flex flex-wrap gap-2">
+  {% for w in weeks %}
+  <a href="/admin/spreads?week_id={{ w.id }}"
+     class="px-3 py-1.5 rounded text-sm font-medium border transition
+       {% if selected_week and w.id == selected_week.id %}
+         bg-gray-900 text-white border-gray-900
+       {% else %}
+         bg-white text-gray-700 border-gray-300 hover:border-gray-500
+       {% endif %}">
+    {{ w.label or ('Week ' + w.week_number|string) }}
+    {% if w.is_completed %}<span class="ml-1 text-xs opacity-60">✓</span>{% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+{% if not selected_week %}
+<p class="text-gray-500">Select a week above.</p>
+{% elif not games %}
+<p class="text-gray-500 text-sm">No games for this week yet. <a href="/admin/week/{{ selected_week.id }}" class="text-blue-600 underline">Sync from nflverse</a> first.</p>
+{% else %}
+
+<div class="flex items-center gap-3 mb-4">
+  <h2 class="font-semibold text-lg">{{ selected_week.label or ('Week ' + selected_week.week_number|string) }}</h2>
   {% if selected_week.is_spreads_locked %}
   <span class="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded">Spreads Locked</span>
+  {% if user.role == 'admin' %}
+  <span class="text-xs text-gray-400">(admins can still override)</span>
+  {% endif %}
   {% endif %}
 </div>
 
-{% if not games %}
-<p class="text-gray-500 text-sm mb-4">No games for this week yet. Sync from ESPN first.</p>
-{% else %}
 <div class="bg-white rounded-xl shadow overflow-hidden">
   <table class="w-full text-sm">
     <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
@@ -57,15 +83,16 @@
           </span>
         </td>
         <td class="px-4 py-3 text-center">
-          {% if not selected_week.is_spreads_locked %}
+          {% if not selected_week.is_spreads_locked or user.role == 'admin' %}
           <form method="post" action="/admin/spreads/update" class="flex items-center gap-2 justify-center">
             <input type="hidden" name="game_id" value="{{ game.id }}" />
+            <input type="hidden" name="redirect_week_id" value="{{ selected_week.id }}" />
             <input name="spread" type="number" step="0.5" placeholder="e.g. -3.5"
               class="w-24 border rounded px-2 py-1 text-sm text-center font-mono"
               title="Negative = home favored, positive = away favored" />
             <button class="bg-blue-600 text-white text-xs px-2 py-1 rounded hover:bg-blue-700">Set</button>
           </form>
-          <div class="text-xs text-gray-400 mt-1">Home perspective. -3.5 = home favored by 3.5</div>
+          <div class="text-xs text-gray-400 mt-1">-3.5 = home favored by 3.5</div>
           {% else %}
           <span class="text-xs text-gray-400">Locked</span>
           {% endif %}
@@ -75,9 +102,8 @@
     </tbody>
   </table>
 </div>
+
 {% endif %}
-{% else %}
-<p class="text-gray-500">No active week found.</p>
 {% endif %}
 
 {% endblock %}

@@ -59,6 +59,7 @@ class Week(Base):
     first_kickoff = Column(DateTime)          # when picks lock
     spread_lock_time = Column(DateTime)       # 24h before first kickoff
     is_picks_locked = Column(Boolean, default=False)
+    picks_lock_override = Column(Boolean, default=False)  # admin manually unlocked; skip auto-relock
     is_spreads_locked = Column(Boolean, default=False)
     is_completed = Column(Boolean, default=False)
     espn_week = Column(Integer)               # ESPN API week number

@@ -204,8 +204,11 @@ async def enforce_locks():
                 week.is_spreads_locked = True
                 logger.info(f"Spread lock enforced for week {week.week_number}")
             if week.first_kickoff and now >= week.first_kickoff and not week.is_picks_locked:
-                week.is_picks_locked = True
-                logger.info(f"Pick lock enforced for week {week.week_number}")
+                if week.picks_lock_override:
+                    pass  # admin manually unlocked; don't auto-relock
+                else:
+                    week.is_picks_locked = True
+                    logger.info(f"Pick lock enforced for week {week.week_number}")
         db.commit()
     except Exception as e:
         logger.error(f"Lock enforcement error: {e}")
