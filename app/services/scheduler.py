@@ -150,6 +150,8 @@ async def sync_spreads():
         season, week = get_active_week(db)
         if not week:
             return
+        if season.year == 9999 or season.year < datetime.utcnow().year:  # skip test/historical
+            return
 
         now = datetime.utcnow()
         if week.is_spreads_locked:
@@ -210,6 +212,24 @@ async def enforce_locks():
         db.rollback()
     finally:
         db.close()
+
+
+async def sync_historical_season(season_id: int, season_year: int, total_weeks: int = 18):
+    """
+    Populate games for every week of a historical season from ESPN.
+    Runs sequentially to avoid DB write contention.
+    Called as a background task — scores are intentionally not imported.
+    """
+    logger.info(f"Starting historical sync for {season_year} ({total_weeks} weeks)")
+    total_games = 0
+    for week_number in range(1, total_weeks + 1):
+        count, error = await sync_week_schedule(season_year, week_number, week_number)
+        if error:
+            logger.warning(f"  week {week_number}: {error}")
+        else:
+            total_games += count
+            logger.info(f"  week {week_number}: {count} games")
+    logger.info(f"Historical sync for {season_year} complete — {total_games} games total")
 
 
 def setup_scheduler():
