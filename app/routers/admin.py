@@ -17,6 +17,154 @@ from app.services.scoring import update_game_results
 
 router = APIRouter(prefix="/admin")
 
+TEST_SEASON_YEAR = 9999
+
+_OPEN_GAMES = [
+    ("KC",  "Kansas City Chiefs",      "LV",  "Las Vegas Raiders",        -7.5),
+    ("DAL", "Dallas Cowboys",          "PHI", "Philadelphia Eagles",       3.5),
+    ("BUF", "Buffalo Bills",           "MIA", "Miami Dolphins",           -3.0),
+    ("SF",  "San Francisco 49ers",     "LAR", "Los Angeles Rams",         -1.5),
+    ("DET", "Detroit Lions",           "GB",  "Green Bay Packers",         2.5),
+    ("NYG", "New York Giants",         "WAS", "Washington Commanders",     1.0),
+    ("CLE", "Cleveland Browns",        "PIT", "Pittsburgh Steelers",       3.5),
+    ("SEA", "Seattle Seahawks",        "ARI", "Arizona Cardinals",        -4.5),
+]
+
+# (away, away_name, home, home_name, spread, away_score, home_score)
+_DONE_GAMES = [
+    ("NE",  "New England Patriots",    "NYJ", "New York Jets",            -2.5,  17, 24),
+    ("BAL", "Baltimore Ravens",        "CIN", "Cincinnati Bengals",       -5.5,  27, 20),
+    ("MIN", "Minnesota Vikings",       "CHI", "Chicago Bears",            -3.5,  31, 17),
+    ("NO",  "New Orleans Saints",      "ATL", "Atlanta Falcons",           1.5,  14, 28),
+    ("TEN", "Tennessee Titans",        "IND", "Indianapolis Colts",        2.0,  20, 17),
+    ("JAX", "Jacksonville Jaguars",    "HOU", "Houston Texans",            4.0,  10, 23),
+    ("DEN", "Denver Broncos",          "LAC", "Los Angeles Chargers",     -1.0,  21, 14),
+    ("TB",  "Tampa Bay Buccaneers",    "CAR", "Carolina Panthers",        -6.5,  34,  7),
+]
+
+ESPN_CDN = "https://a.espncdn.com/i/teamlogos/nfl/500"
+
+
+@router.post("/test-season/create")
+async def create_test_season(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    # Remove any existing test season
+    existing = db.query(Season).filter(Season.year == TEST_SEASON_YEAR).first()
+    if existing:
+        db.query(AuditLog).filter(
+            AuditLog.target_type.in_(["season", "week", "game", "pick"])
+        ).filter(
+            AuditLog.detail.like("%test%")
+        ).delete(synchronize_session=False)
+        week_ids = [w.id for w in db.query(Week).filter(Week.season_id == existing.id).all()]
+        if week_ids:
+            game_ids = [g.id for g in db.query(Game).filter(Game.week_id.in_(week_ids)).all()]
+            if game_ids:
+                db.query(Pick).filter(Pick.game_id.in_(game_ids)).delete(synchronize_session=False)
+            db.query(Game).filter(Game.week_id.in_(week_ids)).delete(synchronize_session=False)
+        db.query(Week).filter(Week.season_id == existing.id).delete(synchronize_session=False)
+        db.delete(existing)
+        db.flush()
+
+    db.query(Season).update({"is_active": False})
+    season = Season(year=TEST_SEASON_YEAR, is_active=True)
+    db.add(season)
+    db.flush()
+
+    now = datetime.utcnow()
+
+    # Week 1 — open, picks unlocked, kickoff tomorrow
+    week1 = Week(
+        season_id=season.id, week_number=1, label="Week 1 (Test — Open)",
+        espn_week=1, first_kickoff=now + timedelta(days=1),
+        is_picks_locked=False, is_spreads_locked=True, is_completed=False,
+    )
+    db.add(week1)
+    db.flush()
+
+    for i, (awt, awn, hwt, hwn, spread) in enumerate(_OPEN_GAMES):
+        db.add(Game(
+            week_id=week1.id,
+            espn_game_id=f"test_open_{i}",
+            away_team=awt, away_team_name=awn,
+            away_team_logo=f"{ESPN_CDN}/{awt.lower()}.png",
+            home_team=hwt, home_team_name=hwn,
+            home_team_logo=f"{ESPN_CDN}/{hwt.lower()}.png",
+            kickoff_time=now + timedelta(days=1, hours=i),
+            spread=spread, spread_source=SpreadSource.manual,
+        ))
+
+    # Week 2 — completed, final scores, picks locked
+    week2 = Week(
+        season_id=season.id, week_number=2, label="Week 2 (Test — Completed)",
+        espn_week=2, first_kickoff=now - timedelta(days=7),
+        is_picks_locked=True, is_spreads_locked=True, is_completed=True,
+    )
+    db.add(week2)
+    db.flush()
+
+    all_users = db.query(User).filter(User.is_active == True).all()
+    n = len(_DONE_GAMES)
+
+    for i, (awt, awn, hwt, hwn, spread, ascore, hscore) in enumerate(_DONE_GAMES):
+        from app.services.scoring import compute_home_covered
+        home_covered = compute_home_covered(hscore, ascore, spread)
+        game = Game(
+            week_id=week2.id,
+            espn_game_id=f"test_done_{i}",
+            away_team=awt, away_team_name=awn,
+            away_team_logo=f"{ESPN_CDN}/{awt.lower()}.png",
+            home_team=hwt, home_team_name=hwn,
+            home_team_logo=f"{ESPN_CDN}/{hwt.lower()}.png",
+            kickoff_time=now - timedelta(days=7, hours=i),
+            spread=spread, spread_source=SpreadSource.manual,
+            away_score=ascore, home_score=hscore,
+            is_final=True, home_covered=home_covered,
+        )
+        db.add(game)
+        db.flush()
+
+        # Give each user a pick for this game (rotate teams, distribute points)
+        for u_idx, u in enumerate(all_users):
+            picked = hwt if (i + u_idx) % 2 == 0 else awt
+            pts = (i + u_idx) % n + 1
+            is_correct = (picked == hwt and home_covered) or (picked == awt and not home_covered)
+            pick = Pick(
+                user_id=u.id, game_id=game.id,
+                week_id=week2.id, season_id=season.id,
+                picked_team=picked, confidence_points=pts,
+                is_correct=is_correct,
+                points_earned=float(pts) if is_correct else 0.0,
+            )
+            db.add(pick)
+
+    db.commit()
+    return RedirectResponse(url="/admin/", status_code=303)
+
+
+@router.post("/test-season/delete")
+async def delete_test_season(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    season = db.query(Season).filter(Season.year == TEST_SEASON_YEAR).first()
+    if season:
+        week_ids = [w.id for w in db.query(Week).filter(Week.season_id == season.id).all()]
+        if week_ids:
+            game_ids = [g.id for g in db.query(Game).filter(Game.week_id.in_(week_ids)).all()]
+            if game_ids:
+                db.query(Pick).filter(Pick.game_id.in_(game_ids)).delete(synchronize_session=False)
+            db.query(Game).filter(Game.week_id.in_(week_ids)).delete(synchronize_session=False)
+        db.query(Week).filter(Week.season_id == season.id).delete(synchronize_session=False)
+        db.delete(season)
+        db.commit()
+
+    return RedirectResponse(url="/admin/", status_code=303)
+
 
 
 # ─── Contributor routes ────────────────────────────────────────────────────────
