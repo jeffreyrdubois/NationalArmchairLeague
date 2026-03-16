@@ -26,6 +26,13 @@
         Lock Picks
       </button>
     </form>
+    {% else %}
+    <form method="post" action="/admin/week/{{ week.id }}/unlock-picks">
+      <button class="bg-yellow-500 text-white text-sm px-3 py-1.5 rounded hover:bg-yellow-600"
+        onclick="return confirm('Unlock picks for this week?')">
+        Unlock Picks
+      </button>
+    </form>
     {% endif %}
   </div>
 </div>

@@ -565,6 +565,21 @@ async def lock_picks(request: Request, week_id: int, db: Session = Depends(get_d
     return RedirectResponse(url=f"/admin/week/{week_id}", status_code=303)
 
 
+@router.post("/week/{week_id}/unlock-picks")
+async def unlock_picks(request: Request, week_id: int, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    week = db.query(Week).filter(Week.id == week_id).first()
+    week.is_picks_locked = False
+    log = AuditLog(user_id=user.id, action="unlock_picks", target_type="week",
+                   target_id=week_id, detail=f"Picks unlocked for week {week.week_number}")
+    db.add(log)
+    db.commit()
+    return RedirectResponse(url=f"/admin/week/{week_id}", status_code=303)
+
+
 @router.get("/picks/edit/{user_id}/{week_id}", response_class=HTMLResponse)
 async def edit_user_picks(
     request: Request,
