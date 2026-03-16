@@ -177,6 +177,9 @@ async def spreads_page(request: Request, db: Session = Depends(get_db)):
 
     season = db.query(Season).filter(Season.is_active == True).first()
     weeks = []
+    selected_week = None
+    games = []
+
     if season:
         weeks = (
             db.query(Week)
@@ -185,18 +188,22 @@ async def spreads_page(request: Request, db: Session = Depends(get_db)):
             .all()
         )
 
-    # Default to current open week
-    current_week = next((w for w in weeks if not w.is_completed), None)
-    games = []
-    selected_week = None
-    if current_week:
-        selected_week = current_week
-        games = (
-            db.query(Game)
-            .filter(Game.week_id == current_week.id)
-            .order_by(Game.kickoff_time)
-            .all()
-        )
+        # Honor ?week_id= param; otherwise default to first incomplete week
+        week_id_param = request.query_params.get("week_id")
+        if week_id_param:
+            selected_week = next((w for w in weeks if str(w.id) == week_id_param), None)
+        if not selected_week:
+            selected_week = next((w for w in weeks if not w.is_completed), None)
+        if not selected_week and weeks:
+            selected_week = weeks[-1]
+
+        if selected_week:
+            games = (
+                db.query(Game)
+                .filter(Game.week_id == selected_week.id)
+                .order_by(Game.kickoff_time)
+                .all()
+            )
 
     return templates.TemplateResponse(
         "admin/spreads.html",
@@ -216,6 +223,7 @@ async def update_spread(
     request: Request,
     game_id: int = Form(...),
     spread: float = Form(...),
+    redirect_week_id: int = Form(None),
     db: Session = Depends(get_db),
 ):
     user = get_current_user(request, db)
@@ -227,7 +235,7 @@ async def update_spread(
         raise HTTPException(status_code=404, detail="Game not found")
 
     week = db.query(Week).filter(Week.id == game.week_id).first()
-    if week and week.is_spreads_locked:
+    if week and week.is_spreads_locked and user.role != Role.admin:
         raise HTTPException(status_code=400, detail="Spreads are locked for this week")
 
     from app.services.odds import round_spread_down
@@ -246,7 +254,8 @@ async def update_spread(
     )
     db.add(log)
     db.commit()
-    return RedirectResponse(url="/admin/spreads", status_code=303)
+    dest = f"/admin/spreads?week_id={redirect_week_id}" if redirect_week_id else "/admin/spreads"
+    return RedirectResponse(url=dest, status_code=303)
 
 
 @router.post("/scores/update")
@@ -561,6 +570,7 @@ async def lock_picks(request: Request, week_id: int, db: Session = Depends(get_d
 
     week = db.query(Week).filter(Week.id == week_id).first()
     week.is_picks_locked = True
+    week.picks_lock_override = False  # re-enable auto-lock behaviour
     db.commit()
     return RedirectResponse(url=f"/admin/week/{week_id}", status_code=303)
 
@@ -573,6 +583,7 @@ async def unlock_picks(request: Request, week_id: int, db: Session = Depends(get
 
     week = db.query(Week).filter(Week.id == week_id).first()
     week.is_picks_locked = False
+    week.picks_lock_override = True  # prevent scheduler from re-locking
     log = AuditLog(user_id=user.id, action="unlock_picks", target_type="week",
                    target_id=week_id, detail=f"Picks unlocked for week {week.week_number}")
     db.add(log)

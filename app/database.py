@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 import os
 
@@ -27,3 +27,13 @@ def get_db():
 def init_db():
     from app import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    _migrate()
+
+
+def _migrate():
+    """Apply incremental schema changes that create_all won't handle on existing tables."""
+    with engine.connect() as conn:
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(weeks)")).fetchall()}
+        if "picks_lock_override" not in existing:
+            conn.execute(text("ALTER TABLE weeks ADD COLUMN picks_lock_override BOOLEAN DEFAULT 0"))
+            conn.commit()
