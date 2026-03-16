@@ -10,15 +10,12 @@ services:
     volumes:
       - ./data:/app/data    # SQLite database persists here
     environment:
-      # REQUIRED: Change this to a long random string before deploying
-      - SECRET_KEY=change-me-to-a-long-random-secret-key
-
-      # OPTIONAL: Get a free key at https://the-odds-api.com (500 req/month free tier)
-      # If not set, spreads must be entered manually by Contributors
-      - ODDS_API_KEY=
+      # Loaded from .env file — never hardcode secrets here
+      - SECRET_KEY
+      - ODDS_API_KEY
 
       # Set to "false" once everyone has registered to prevent new signups
-      - REGISTRATION_OPEN=true
+      - REGISTRATION_OPEN
 
       # Database path (leave as-is when using the volume mount above)
       - DATABASE_URL=sqlite:////app/data/nal.db
