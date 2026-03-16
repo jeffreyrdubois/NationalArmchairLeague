@@ -20,12 +20,18 @@
   <!-- Navbar -->
   <nav class="bg-gray-900 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+      <!-- Top bar -->
       <div class="flex items-center justify-between h-16">
-        <div class="flex items-center gap-6">
-          <a href="/" class="flex items-center gap-2">
-            <img src="/static/images/nal-logo.png" alt="NAL" class="h-10 w-auto" />
-          </a>
-          {% if user %}
+
+        <!-- Logo -->
+        <a href="/" class="flex items-center gap-2 shrink-0">
+          <img src="/static/images/nal-logo.png" alt="NAL" class="h-10 w-auto" />
+        </a>
+
+        <!-- Desktop nav links -->
+        {% if user %}
+        <div class="hidden sm:flex items-center gap-6">
           <a href="/" class="text-sm hover:text-yellow-300 transition">Dashboard</a>
           <a href="/picks" class="text-sm hover:text-yellow-300 transition">My Picks</a>
           <a href="/standings" class="text-sm hover:text-yellow-300 transition">Standings</a>
@@ -41,28 +47,86 @@
             </div>
           </div>
           {% endif %}
-          {% endif %}
         </div>
-        <div class="flex items-center gap-4">
+        {% endif %}
+
+        <!-- Right side -->
+        <div class="flex items-center gap-3">
           {% if user %}
-          <a href="/profile/{{ user.id }}" class="text-sm text-gray-300 hover:text-white">
+          <!-- Desktop: user info -->
+          <a href="/profile/{{ user.id }}" class="hidden sm:inline-flex items-center gap-1.5 text-sm text-gray-300 hover:text-white">
             {{ user.first_name }} {{ user.last_name }}
-            <span class="ml-1 text-xs px-1.5 py-0.5 rounded
+            <span class="text-xs px-1.5 py-0.5 rounded
               {% if user.role == 'admin' %}bg-red-600
               {% elif user.role == 'contributor' %}bg-blue-600
               {% else %}bg-gray-600{% endif %}">
               {{ user.role }}
             </span>
           </a>
-          <a href="/logout" class="text-sm text-gray-400 hover:text-white">Logout</a>
+          <a href="/logout" class="hidden sm:inline text-sm text-gray-400 hover:text-white">Logout</a>
+          <!-- Mobile: hamburger -->
+          <button id="nav-toggle" class="sm:hidden p-2 rounded hover:bg-gray-700 focus:outline-none" aria-label="Open menu">
+            <svg id="nav-icon-open" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
+            </svg>
+            <svg id="nav-icon-close" class="h-6 w-6 hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
           {% else %}
           <a href="/login" class="text-sm hover:text-yellow-300">Login</a>
           <a href="/register" class="text-sm bg-yellow-400 text-gray-900 px-3 py-1 rounded font-medium hover:bg-yellow-300">Register</a>
           {% endif %}
         </div>
+
+      </div><!-- /top bar -->
+
+      <!-- Mobile menu (hidden until hamburger toggled) -->
+      {% if user %}
+      <div id="nav-mobile" class="hidden sm:hidden border-t border-gray-700 pb-4">
+        <div class="flex flex-col mt-3 gap-0.5">
+          <a href="/" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Dashboard</a>
+          <a href="/picks" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">My Picks</a>
+          <a href="/standings" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Standings</a>
+          {% if user.role in ('contributor', 'admin') %}
+          <a href="/admin/spreads" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Manage → Spreads</a>
+          <a href="/admin/scores" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Manage → Scores</a>
+          {% if user.role == 'admin' %}
+          <a href="/admin/" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Admin Panel</a>
+          {% endif %}
+          {% endif %}
+          <div class="border-t border-gray-700 mt-2 pt-2 flex items-center justify-between px-2">
+            <a href="/profile/{{ user.id }}" class="text-sm text-gray-300 hover:text-white flex items-center gap-1.5">
+              {{ user.first_name }} {{ user.last_name }}
+              <span class="text-xs px-1.5 py-0.5 rounded
+                {% if user.role == 'admin' %}bg-red-600
+                {% elif user.role == 'contributor' %}bg-blue-600
+                {% else %}bg-gray-600{% endif %}">
+                {{ user.role }}
+              </span>
+            </a>
+            <a href="/logout" class="text-sm text-gray-400 hover:text-white">Logout</a>
+          </div>
+        </div>
       </div>
+      {% endif %}
+
     </div>
   </nav>
+  <script>
+    (function () {
+      var btn   = document.getElementById('nav-toggle');
+      var menu  = document.getElementById('nav-mobile');
+      var open  = document.getElementById('nav-icon-open');
+      var close = document.getElementById('nav-icon-close');
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        var hidden = menu.classList.toggle('hidden');
+        open.classList.toggle('hidden', !hidden);
+        close.classList.toggle('hidden', hidden);
+      });
+    })();
+  </script>
 
   <!-- Flash messages -->
   {% if request.query_params.get('saved') %}
