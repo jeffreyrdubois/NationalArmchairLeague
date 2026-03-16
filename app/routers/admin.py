@@ -256,6 +256,7 @@ async def update_score(
     home_score: int = Form(...),
     away_score: int = Form(...),
     is_final: bool = Form(False),
+    redirect_week_id: int = Form(None),
     db: Session = Depends(get_db),
 ):
     user = get_current_user(request, db)
@@ -285,7 +286,8 @@ async def update_score(
     else:
         db.commit()
 
-    return RedirectResponse(url="/admin/scores", status_code=303)
+    dest = f"/admin/scores?week_id={redirect_week_id}" if redirect_week_id else "/admin/scores"
+    return RedirectResponse(url=dest, status_code=303)
 
 
 @router.get("/scores", response_class=HTMLResponse)
@@ -295,19 +297,31 @@ async def scores_page(request: Request, db: Session = Depends(get_db)):
         return RedirectResponse(url="/", status_code=303)
 
     season = db.query(Season).filter(Season.is_active == True).first()
-    current_week = None
+    weeks = []
+    selected_week = None
     games = []
+
     if season:
-        current_week = (
+        weeks = (
             db.query(Week)
-            .filter(Week.season_id == season.id, Week.is_completed == False)
+            .filter(Week.season_id == season.id)
             .order_by(Week.week_number)
-            .first()
+            .all()
         )
-        if current_week:
+
+        # Honor ?week_id= param; otherwise default to first incomplete week
+        week_id_param = request.query_params.get("week_id")
+        if week_id_param:
+            selected_week = next((w for w in weeks if str(w.id) == week_id_param), None)
+        if not selected_week:
+            selected_week = next((w for w in weeks if not w.is_completed), None)
+        if not selected_week and weeks:
+            selected_week = weeks[-1]  # fall back to last week of season
+
+        if selected_week:
             games = (
                 db.query(Game)
-                .filter(Game.week_id == current_week.id)
+                .filter(Game.week_id == selected_week.id)
                 .order_by(Game.kickoff_time)
                 .all()
             )
@@ -318,7 +332,8 @@ async def scores_page(request: Request, db: Session = Depends(get_db)):
             "request": request,
             "user": user,
             "season": season,
-            "current_week": current_week,
+            "weeks": weeks,
+            "current_week": selected_week,
             "games": games,
         },
     )
