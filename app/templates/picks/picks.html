@@ -53,7 +53,7 @@
     <div class="bg-white rounded-xl shadow mb-4 p-4">
       <!-- Kickoff -->
       <div class="text-xs text-gray-400 mb-3">
-        {{ game.kickoff_time.strftime('%A %b %-d &mdash; %-I:%M%p ET') if game.kickoff_time else 'Kickoff TBD' }}
+        {{ game.kickoff_time.strftime('%A %b %-d \u2014 %-I:%M%p ET') if game.kickoff_time else 'Kickoff TBD' }}
         {% if game.spread is none %}
           <span class="ml-2 text-orange-500">Spread TBD</span>
         {% endif %}
@@ -78,8 +78,8 @@
             <div class="font-semibold text-sm">{{ game.away_team_name or game.away_team }}</div>
             <div class="text-xs text-gray-500 mt-1">
               {% if game.spread is not none %}
-                {% if game.spread > 0 %}+{{ "%.1f"|format(game.spread) }}
-                {% elif game.spread < 0 %}Fav -{{ "%.1f"|format(-game.spread) }}
+                {% if game.spread < 0 %}+{{ "%.1f"|format(-game.spread) }}
+                {% elif game.spread > 0 %}Fav -{{ "%.1f"|format(game.spread) }}
                 {% else %}PK{% endif %}
               {% else %}Spread TBD{% endif %}
             </div>
@@ -131,6 +131,9 @@
     {% endfor %}
 
     {% if not week.is_picks_locked %}
+    <div id="dupe-warning" class="hidden bg-red-50 border border-red-300 text-red-700 rounded-xl px-4 py-3 mb-3 text-sm font-medium">
+      Each point value can only be used once — you have duplicate confidence points assigned.
+    </div>
     <div class="sticky bottom-4">
       <button type="submit" id="submit-btn"
         class="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-3 rounded-xl shadow-lg transition text-lg">
@@ -144,59 +147,85 @@
 <script>
 function updateLegend() {
   const form = document.getElementById('picks-form');
-  const usedPoints = new Set();
+  const pointCounts = {};
 
-  // Collect all selected points
   form.querySelectorAll('select[name$="_points"]').forEach(sel => {
-    if (sel.value) usedPoints.add(parseInt(sel.value));
+    if (sel.value) {
+      const v = parseInt(sel.value);
+      pointCounts[v] = (pointCounts[v] || 0) + 1;
+    }
   });
 
-  // Update legend display
+  const dupeValues = new Set(
+    Object.entries(pointCounts).filter(([, n]) => n > 1).map(([v]) => parseInt(v))
+  );
+  const hasDupes = dupeValues.size > 0;
+
+  // Update legend pills
   document.querySelectorAll('[id^="legend-"]').forEach(el => {
     const pt = parseInt(el.id.replace('legend-', ''));
-    if (usedPoints.has(pt)) {
+    const used = pt in pointCounts;
+    const dupe = dupeValues.has(pt);
+    el.classList.remove(
+      'bg-blue-100', 'text-blue-700', 'border-blue-400',
+      'bg-red-100', 'text-red-700', 'border-red-400',
+      'bg-white', 'text-gray-700',
+      'bg-gray-200', 'text-gray-400', 'line-through'
+    );
+    if (dupe) {
+      el.classList.add('bg-red-100', 'text-red-700', 'border-red-400');
+    } else if (used) {
       el.classList.add('bg-blue-100', 'text-blue-700', 'border-blue-400');
-      el.classList.remove('bg-white', 'text-gray-700', 'line-through', 'bg-gray-200', 'text-gray-400');
     } else {
-      el.classList.remove('bg-blue-100', 'text-blue-700', 'border-blue-400', 'line-through', 'bg-gray-200', 'text-gray-400');
       el.classList.add('bg-white', 'text-gray-700');
     }
   });
+
+  // Highlight duplicate selects in red
+  form.querySelectorAll('select[name$="_points"]').forEach(sel => {
+    const v = sel.value ? parseInt(sel.value) : null;
+    if (v && dupeValues.has(v)) {
+      sel.classList.add('border-red-400', 'ring-1', 'ring-red-400');
+    } else {
+      sel.classList.remove('border-red-400', 'ring-1', 'ring-red-400');
+    }
+  });
+
+  // Show/hide warning banner
+  const warn = document.getElementById('dupe-warning');
+  if (warn) warn.classList.toggle('hidden', !hasDupes);
+
+  // Disable submit if dupes
+  const btn = document.getElementById('submit-btn');
+  if (btn) {
+    btn.disabled = hasDupes;
+    btn.classList.toggle('opacity-50', hasDupes);
+    btn.classList.toggle('cursor-not-allowed', hasDupes);
+  }
 }
 
 // Validate before submit: all picks entered and no duplicates
 document.getElementById('picks-form')?.addEventListener('submit', function(e) {
   const form = e.target;
   const points = [];
-  let hasError = false;
+  let missingPick = false;
 
   form.querySelectorAll('select[name$="_points"]').forEach(sel => {
-    if (!sel.value) { hasError = true; return; }
-    points.push(sel.value);
+    if (sel.value) points.push(sel.value);
   });
 
-  form.querySelectorAll('input[type="radio"][name$="_team"]').forEach(radio => {
-    // Check each game has a selection
-  });
-
-  // Check all radio groups have a selection
-  const gameIds = new Set();
   form.querySelectorAll('select[name$="_points"]').forEach(sel => {
     const gameId = sel.name.replace('game_', '').replace('_points', '');
-    const checked = form.querySelector(`input[name="game_${gameId}_team"]:checked`);
-    if (!checked) {
-      hasError = true;
-      gameIds.add(gameId);
+    if (!form.querySelector(`input[name="game_${gameId}_team"]:checked`)) {
+      missingPick = true;
     }
   });
 
   const dupes = points.length !== new Set(points).size;
 
-  if (hasError || dupes) {
+  if (dupes || missingPick) {
     e.preventDefault();
-    alert(dupes
-      ? 'Each point value can only be used once. Please fix duplicates.'
-      : 'Please make a pick for every game before saving.');
+    if (missingPick) alert('Please make a pick for every game before saving.');
   }
 });
 
