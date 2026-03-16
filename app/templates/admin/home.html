@@ -76,8 +76,8 @@
     <tbody>
       {% for u in users %}
       <tr class="border-t">
-        <td class="py-2 font-medium">{{ u.display_name }}</td>
-        <td class="py-2 text-gray-500">@{{ u.username }}</td>
+        <td class="py-2 font-medium">{{ u.first_name }} {{ u.last_name }}</td>
+        <td class="py-2 text-gray-500">{{ u.email }}</td>
         <td class="py-2">
           <span class="text-xs px-2 py-0.5 rounded capitalize
             {% if u.role == 'admin' %}bg-red-100 text-red-700
@@ -102,7 +102,7 @@
     {% for log in recent_logs %}
     <div class="text-sm flex gap-3 border-b pb-2">
       <span class="text-gray-400 whitespace-nowrap">{{ log.created_at.strftime('%m/%d %H:%M') }}</span>
-      <span class="font-medium">{{ log.user.display_name if log.user else '?' }}</span>
+      <span class="font-medium">{{ (log.user.first_name ~ ' ' ~ log.user.last_name) if log.user else '?' }}</span>
       <span class="text-gray-600">{{ log.action }}</span>
       <span class="text-gray-400 truncate">{{ log.detail }}</span>
     </div>

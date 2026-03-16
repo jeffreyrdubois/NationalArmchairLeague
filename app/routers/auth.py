@@ -25,15 +25,15 @@ async def login_page(request: Request, db: Session = Depends(get_db)):
 @router.post("/login")
 async def login(
     request: Request,
-    username: str = Form(...),
+    email: str = Form(...),
     password: str = Form(...),
     db: Session = Depends(get_db),
 ):
-    user = db.query(User).filter(User.username == username).first()
+    user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(password, user.password_hash):
         return templates.TemplateResponse(
             "auth/login.html",
-            {"request": request, "error": "Invalid username or password"},
+            {"request": request, "error": "Invalid email or password"},
             status_code=401,
         )
     if not user.is_active:
@@ -70,8 +70,8 @@ async def register_page(request: Request, db: Session = Depends(get_db)):
 @router.post("/register")
 async def register(
     request: Request,
-    username: str = Form(...),
-    display_name: str = Form(...),
+    first_name: str = Form(...),
+    last_name: str = Form(...),
     email: str = Form(...),
     password: str = Form(...),
     password2: str = Form(...),
@@ -85,8 +85,6 @@ async def register(
         error = "Passwords do not match"
     elif len(password) < 8:
         error = "Password must be at least 8 characters"
-    elif db.query(User).filter(User.username == username).first():
-        error = "Username already taken"
     elif db.query(User).filter(User.email == email).first():
         error = "Email already registered"
 
@@ -100,8 +98,8 @@ async def register(
     # First registered user becomes admin
     is_first = db.query(User).count() == 0
     user = User(
-        username=username,
-        display_name=display_name,
+        first_name=first_name.strip(),
+        last_name=last_name.strip(),
         email=email,
         password_hash=hash_password(password),
         role=Role.admin if is_first else Role.player,
