@@ -11,7 +11,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Season, Week, Game, Pick, User, Role, AuditLog, SpreadSource
-from app.auth import get_current_user, require_contributor, require_admin
+from app.auth import get_current_user, require_contributor, require_admin, hash_password
 from app.services import espn
 from app.services.scoring import update_game_results
 
@@ -694,10 +694,49 @@ async def users_page(request: Request, db: Session = Depends(get_db)):
         return RedirectResponse(url="/", status_code=303)
 
     users = db.query(User).order_by(User.last_name, User.first_name).all()
+    error = request.query_params.get("error")
     return templates.TemplateResponse(
         "admin/users.html",
-        {"request": request, "user": user, "users": users, "roles": Role},
+        {"request": request, "user": user, "users": users, "roles": Role, "error": error},
     )
+
+
+@router.post("/users/add")
+async def add_user(
+    request: Request,
+    first_name: str = Form(...),
+    last_name: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    email = email.strip().lower()
+    if db.query(User).filter(User.email == email).first():
+        return RedirectResponse(url="/admin/users?error=Email+already+registered", status_code=303)
+
+    new_user = User(
+        first_name=first_name.strip(),
+        last_name=last_name.strip(),
+        email=email,
+        password_hash=hash_password(password),
+        role=Role.player,
+        is_active=True,
+    )
+    db.add(new_user)
+    db.flush()
+    db.add(AuditLog(
+        user_id=user.id,
+        action="add_user",
+        target_type="user",
+        target_id=new_user.id,
+        detail=f"Created player account for {new_user.full_name} ({email})",
+    ))
+    db.commit()
+    return RedirectResponse(url="/admin/users", status_code=303)
 
 
 @router.post("/users/{user_id}/role")
