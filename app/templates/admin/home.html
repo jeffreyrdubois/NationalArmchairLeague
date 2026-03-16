@@ -47,7 +47,16 @@
       <div class="flex items-center gap-2 mb-2">
         <span class="font-semibold">{{ season.year }}</span>
         {% if season.is_active %}
-        <span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded">Active</span>
+          <span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded">Active</span>
+          <form method="post" action="/admin/season/{{ season.id }}/deactivate" class="inline">
+            <button class="text-xs text-gray-400 hover:text-red-600 underline">Deactivate</button>
+          </form>
+        {% else %}
+          <form method="post" action="/admin/season/{{ season.id }}/activate" class="inline">
+            <button class="text-xs bg-green-100 text-green-700 hover:bg-green-200 px-2 py-0.5 rounded font-medium">
+              Set Active
+            </button>
+          </form>
         {% endif %}
       </div>
       <div class="flex flex-wrap gap-1">
