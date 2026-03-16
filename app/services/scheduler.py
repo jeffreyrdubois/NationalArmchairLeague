@@ -222,14 +222,22 @@ async def sync_historical_season(season_id: int, season_year: int, total_weeks: 
     """
     logger.info(f"Starting historical sync for {season_year} ({total_weeks} weeks)")
     total_games = 0
+    ok_weeks = []
+    failed_weeks = []
     for week_number in range(1, total_weeks + 1):
         count, error = await sync_week_schedule(season_year, week_number, week_number)
         if error:
+            failed_weeks.append(week_number)
             logger.warning(f"  week {week_number}: {error}")
         else:
             total_games += count
+            ok_weeks.append(week_number)
             logger.info(f"  week {week_number}: {count} games")
-    logger.info(f"Historical sync for {season_year} complete — {total_games} games total")
+    logger.info(
+        f"Historical sync for {season_year} complete — "
+        f"{total_games} games across {len(ok_weeks)} weeks "
+        f"({len(failed_weeks)} weeks unavailable: {failed_weeks or 'none'})"
+    )
 
 
 def setup_scheduler():

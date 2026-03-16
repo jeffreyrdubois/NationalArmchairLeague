@@ -49,6 +49,7 @@ async def fetch_week_schedule(season_year: int, week: int) -> list[dict]:
         "seasontype": 2,  # regular season
         "season": season_year,
         "week": week,
+        "limit": 100,  # default is very low; ensure all games are returned
     }
     async with httpx.AsyncClient(timeout=15) as client:
         try:
