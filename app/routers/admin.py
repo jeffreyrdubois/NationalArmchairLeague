@@ -465,6 +465,8 @@ async def week_admin(request: Request, week_id: int, db: Session = Depends(get_d
             "week": week,
             "games": games,
             "all_users": all_users,
+            "sync_ok": request.query_params.get("sync_ok"),
+            "sync_error": request.query_params.get("sync_error"),
         },
     )
 
@@ -482,9 +484,12 @@ async def sync_week(request: Request, week_id: int, db: Session = Depends(get_db
 
     season = db.query(Season).filter(Season.id == week.season_id).first()
     from app.services.scheduler import sync_week_schedule
-    await sync_week_schedule(season.year, week.week_number, week.espn_week or week.week_number)
+    from urllib.parse import quote
+    count, error = await sync_week_schedule(season.year, week.week_number, week.espn_week or week.week_number)
 
-    return RedirectResponse(url=f"/admin/week/{week_id}", status_code=303)
+    if error:
+        return RedirectResponse(url=f"/admin/week/{week_id}?sync_error={quote(error)}", status_code=303)
+    return RedirectResponse(url=f"/admin/week/{week_id}?sync_ok={count}", status_code=303)
 
 
 @router.post("/week/{week_id}/lock-spreads")

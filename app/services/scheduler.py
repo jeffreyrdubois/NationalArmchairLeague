@@ -40,6 +40,8 @@ async def sync_scores():
         season, week = get_active_week(db)
         if not week or not week.espn_week:
             return
+        if season.year == 9999:  # skip test season
+            return
 
         logger.info(f"Syncing scores for season {season.year} week {week.week_number}")
         game_data = await espn.fetch_live_scores(season.year, week.espn_week)
@@ -76,24 +78,30 @@ async def sync_scores():
         db.close()
 
 
-async def sync_week_schedule(season_year: int, week_number: int, espn_week: int):
-    """Fetch and store the schedule for a given week."""
+async def sync_week_schedule(season_year: int, week_number: int, espn_week: int) -> tuple[int, str | None]:
+    """
+    Fetch and store the schedule for a given week.
+    Returns (game_count, error_message). error_message is None on success.
+    """
+    if season_year == 9999:
+        return 0, "Cannot sync test season from ESPN"
+
     db = SessionLocal()
     try:
         season = db.query(Season).filter(Season.year == season_year).first()
         if not season:
-            return
+            return 0, "Season not found"
 
         week = db.query(Week).filter(
             Week.season_id == season.id, Week.week_number == week_number
         ).first()
         if not week:
-            return
+            return 0, "Week not found"
 
         game_data = await espn.fetch_week_schedule(season_year, espn_week)
         if not game_data:
             logger.warning(f"No games returned for week {week_number}")
-            return
+            return 0, f"ESPN returned no games for {season_year} week {week_number} — the season may be over or the ESPN API may be temporarily unavailable"
 
         # Sort by kickoff to determine first game
         game_data.sort(key=lambda g: g["kickoff_time"] or datetime.max)
@@ -125,10 +133,12 @@ async def sync_week_schedule(season_year: int, week_number: int, espn_week: int)
 
         db.commit()
         logger.info(f"Synced {len(game_data)} games for week {week_number}")
+        return len(game_data), None
 
     except Exception as e:
         logger.error(f"Schedule sync error: {e}")
         db.rollback()
+        return 0, str(e)
     finally:
         db.close()
 
