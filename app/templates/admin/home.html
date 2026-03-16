@@ -27,6 +27,12 @@
   </div>
 </div>
 
+{% if historical_sync %}
+<div class="bg-blue-50 border border-blue-300 text-blue-800 rounded-xl px-4 py-3 mb-6 text-sm">
+  Historical game sync is running in the background. Refresh in a minute to see the games populate.
+</div>
+{% endif %}
+
 <div class="bg-white rounded-xl shadow p-5 mb-8">
   <h2 class="font-semibold text-lg mb-4">Seasons</h2>
   <form method="post" action="/admin/season/create" class="flex gap-2 mb-5">
@@ -55,6 +61,13 @@
           <form method="post" action="/admin/season/{{ season.id }}/activate" class="inline">
             <button class="text-xs bg-green-100 text-green-700 hover:bg-green-200 px-2 py-0.5 rounded font-medium">
               Set Active
+            </button>
+          </form>
+        {% endif %}
+        {% if season.year < current_year and season.year != 9999 %}
+          <form method="post" action="/admin/season/{{ season.id }}/sync-all" class="inline">
+            <button class="text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 px-2 py-0.5 rounded font-medium">
+              Sync All Weeks
             </button>
           </form>
         {% endif %}

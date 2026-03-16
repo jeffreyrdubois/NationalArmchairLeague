@@ -5,7 +5,7 @@ Admin and Contributor routes.
 - Admins: all of the above + manage users, edit any pick, manage seasons/weeks
 """
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Request, Depends, Form, HTTPException
+from fastapi import APIRouter, Request, Depends, Form, HTTPException, BackgroundTasks
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 
 from sqlalchemy.orm import Session
@@ -349,6 +349,7 @@ async def admin_home(request: Request, db: Session = Depends(get_db)):
         .all()
     )
 
+    current_year = datetime.utcnow().year
     return templates.TemplateResponse(
         "admin/home.html",
         {
@@ -358,6 +359,8 @@ async def admin_home(request: Request, db: Session = Depends(get_db)):
             "season_weeks": season_weeks,
             "users": users,
             "recent_logs": recent_logs,
+            "current_year": current_year,
+            "historical_sync": request.query_params.get("historical_sync"),
         },
     )
 
@@ -365,6 +368,7 @@ async def admin_home(request: Request, db: Session = Depends(get_db)):
 @router.post("/season/create")
 async def create_season(
     request: Request,
+    background_tasks: BackgroundTasks,
     year: int = Form(...),
     make_active: bool = Form(False),
     db: Session = Depends(get_db),
@@ -394,12 +398,42 @@ async def create_season(
         )
         db.add(week)
 
+    is_historical = year < datetime.utcnow().year and year != 9999
+    detail = f"Created season {year} with 18 weeks"
+    if is_historical:
+        detail += " (historical sync queued)"
+
     log = AuditLog(user_id=user.id, action="create_season", target_type="season",
-                   target_id=season.id, detail=f"Created season {year} with 18 weeks")
+                   target_id=season.id, detail=detail)
     db.add(log)
     db.commit()
 
+    if is_historical:
+        from app.services.scheduler import sync_historical_season
+        background_tasks.add_task(sync_historical_season, season.id, year)
+        return RedirectResponse(url="/admin/?historical_sync=1", status_code=303)
+
     return RedirectResponse(url="/admin/", status_code=303)
+
+
+@router.post("/season/{season_id}/sync-all")
+async def sync_all_weeks(
+    request: Request,
+    season_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    season = db.query(Season).filter(Season.id == season_id).first()
+    if not season:
+        raise HTTPException(status_code=404)
+
+    from app.services.scheduler import sync_historical_season
+    background_tasks.add_task(sync_historical_season, season.id, season.year)
+    return RedirectResponse(url="/admin/?historical_sync=1", status_code=303)
 
 
 @router.post("/season/{season_id}/activate")
