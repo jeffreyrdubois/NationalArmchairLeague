@@ -60,7 +60,7 @@
               {% if user.role == 'admin' %}bg-red-600
               {% elif user.role == 'contributor' %}bg-blue-600
               {% else %}bg-gray-600{% endif %}">
-              {{ user.role }}
+              {{ user.role.value | title }}
             </span>
           </a>
           <a href="/logout" class="hidden sm:inline text-sm text-gray-400 hover:text-white">Logout</a>
@@ -102,7 +102,7 @@
                 {% if user.role == 'admin' %}bg-red-600
                 {% elif user.role == 'contributor' %}bg-blue-600
                 {% else %}bg-gray-600{% endif %}">
-                {{ user.role }}
+                {{ user.role.value | title }}
               </span>
             </a>
             <a href="/logout" class="text-sm text-gray-400 hover:text-white">Logout</a>

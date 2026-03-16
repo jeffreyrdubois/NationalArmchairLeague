@@ -7,6 +7,42 @@
   <h1 class="text-2xl font-bold">Manage Users</h1>
 </div>
 
+<!-- Add Player form -->
+<div class="bg-white rounded-xl shadow p-5 mb-6">
+  <h2 class="font-semibold text-base mb-4">Add New Player</h2>
+  {% if error %}
+  <p class="text-sm text-red-600 mb-3">{{ error }}</p>
+  {% endif %}
+  <form method="post" action="/admin/users/add" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">First Name</label>
+      <input name="first_name" required placeholder="Jane"
+        class="w-full border rounded px-3 py-1.5 text-sm" />
+    </div>
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">Last Name</label>
+      <input name="last_name" required placeholder="Smith"
+        class="w-full border rounded px-3 py-1.5 text-sm" />
+    </div>
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">Email</label>
+      <input name="email" type="email" required placeholder="jane@example.com"
+        class="w-full border rounded px-3 py-1.5 text-sm" />
+    </div>
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">Temporary Password</label>
+      <input name="password" type="text" required placeholder="temp password"
+        class="w-full border rounded px-3 py-1.5 text-sm" />
+    </div>
+    <div>
+      <button class="w-full bg-gray-900 text-white text-sm px-4 py-1.5 rounded hover:bg-gray-700">
+        Add Player
+      </button>
+    </div>
+  </form>
+</div>
+
+<!-- Users table -->
 <div class="bg-white rounded-xl shadow overflow-hidden">
   <table class="w-full text-sm">
     <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
@@ -29,12 +65,12 @@
             <select name="role" onchange="this.form.submit()"
               class="text-xs border rounded px-1 py-0.5">
               {% for r in roles %}
-              <option value="{{ r.value }}" {% if u.role == r %}selected{% endif %}>{{ r.value }}</option>
+              <option value="{{ r.value }}" {% if u.role == r %}selected{% endif %}>{{ r.value | title }}</option>
               {% endfor %}
             </select>
           </form>
           {% else %}
-          <span class="text-xs text-gray-500 capitalize">{{ u.role }} (you)</span>
+          <span class="text-xs text-gray-500 capitalize">{{ u.role.value | title }} (you)</span>
           {% endif %}
         </td>
         <td class="px-4 py-3 text-center">
