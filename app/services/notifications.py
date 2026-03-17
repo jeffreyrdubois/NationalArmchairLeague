@@ -3,6 +3,11 @@ Web Push notification service.
 
 VAPID keys are auto-generated on first startup and stored in the app_settings
 table so they persist across container restarts without any manual configuration.
+
+pywebpush expects `vapid_private_key` to be the raw 32-byte P-256 private key
+scalar encoded as base64url (no padding) — NOT a PEM string.
+The matching public key for the browser applicationServerKey is the 65-byte
+uncompressed EC point also encoded as base64url.
 """
 import json
 import logging
@@ -15,45 +20,46 @@ logger = logging.getLogger(__name__)
 
 
 def _generate_vapid_keys(db: Session) -> tuple[str, str]:
-    """Generate a fresh VAPID key pair, store it, and return (private_pem, public_b64url)."""
+    """Generate a fresh VAPID key pair, store it, return (private_b64, public_b64)."""
     from cryptography.hazmat.primitives.asymmetric.ec import generate_private_key, SECP256R1
-    from cryptography.hazmat.primitives.serialization import (
-        Encoding, PublicFormat, PrivateFormat, NoEncryption,
-    )
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
     private_key = generate_private_key(SECP256R1())
-    # TraditionalOpenSSL → "-----BEGIN EC PRIVATE KEY-----" (SEC1, named curve)
-    private_pem = private_key.private_bytes(
-        Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption()
-    ).decode("utf-8")
-    pub_bytes = private_key.public_key().public_bytes(
-        Encoding.X962, PublicFormat.UncompressedPoint
-    )
-    public_b64 = base64.urlsafe_b64encode(pub_bytes).rstrip(b"=").decode("utf-8")
 
-    db.merge(AppSetting(key="vapid_private_key", value=private_pem))
+    # Raw 32-byte scalar — the format pywebpush/py_vapid expects
+    d = private_key.private_numbers().private_value
+    private_b64 = base64.urlsafe_b64encode(d.to_bytes(32, "big")).rstrip(b"=").decode()
+
+    # 65-byte uncompressed point — what the browser needs for applicationServerKey
+    pub_bytes = private_key.public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+    public_b64 = base64.urlsafe_b64encode(pub_bytes).rstrip(b"=").decode()
+
+    db.merge(AppSetting(key="vapid_private_key", value=private_b64))
     db.merge(AppSetting(key="vapid_public_key", value=public_b64))
     db.commit()
     logger.info("Generated new VAPID key pair and stored in app_settings")
-    return private_pem, public_b64
+    return private_b64, public_b64
 
 
 def _get_or_create_vapid_keys(db: Session) -> tuple[str, str]:
-    """Return (private_key_pem, public_key_base64url), generating them if needed."""
+    """Return (private_b64, public_b64), generating them if missing or invalid."""
     priv_row = db.query(AppSetting).filter(AppSetting.key == "vapid_private_key").first()
     pub_row = db.query(AppSetting).filter(AppSetting.key == "vapid_public_key").first()
 
     if priv_row and pub_row:
-        # Verify the stored key is actually loadable before trusting it
+        # Validate: raw private key must decode to exactly 32 bytes
         try:
-            from cryptography.hazmat.primitives.serialization import load_pem_private_key
-            load_pem_private_key(priv_row.value.encode("utf-8"), password=None)
-            return priv_row.value, pub_row.value
+            padding = "=" * ((4 - len(priv_row.value) % 4) % 4)
+            raw = base64.urlsafe_b64decode(priv_row.value + padding)
+            if len(raw) == 32:
+                return priv_row.value, pub_row.value
+            logger.warning("Stored VAPID private key is wrong length (%d bytes) — regenerating", len(raw))
         except Exception:
-            logger.warning("Stored VAPID private key is unreadable — regenerating")
-            db.delete(priv_row)
-            db.delete(pub_row)
-            db.commit()
+            logger.warning("Stored VAPID private key is not valid base64 — regenerating")
+        # Bad key: wipe and regenerate
+        db.delete(priv_row)
+        db.delete(pub_row)
+        db.commit()
 
     return _generate_vapid_keys(db)
 
@@ -77,7 +83,7 @@ def init_vapid_keys():
 
 
 def _send_to_subscription(sub: PushSubscription, title: str, body: str, url: str = "/",
-                           private_pem: str = None, db: Session = None) -> bool:
+                           private_b64: str = None, db: Session = None) -> bool:
     """Send a push to one subscription. Returns False if the subscription is gone."""
     from pywebpush import webpush, WebPushException
 
@@ -88,56 +94,52 @@ def _send_to_subscription(sub: PushSubscription, title: str, body: str, url: str
                 "keys": {"p256dh": sub.p256dh, "auth": sub.auth_key},
             },
             data=json.dumps({"title": title, "body": body, "url": url}),
-            vapid_private_key=private_pem,
+            vapid_private_key=private_b64,
             vapid_claims={"sub": "mailto:noreply@nal.local"},
         )
         return True
     except WebPushException as e:
         status = e.response.status_code if e.response is not None else None
         if status in (404, 410):
-            # Subscription expired/unregistered — remove it
             if db:
                 db.delete(sub)
             return False
-        logger.warning(f"Push failed for sub {sub.id} (status {status}): {e}")
-        return True  # keep the subscription; transient error
+        logger.warning("Push failed for sub %d (status %s): %s", sub.id, status, e)
+        return True  # transient error — keep subscription
 
 
 def send_to_user(user: User, title: str, body: str, url: str = "/", db: Session = None) -> int:
-    """Send a push notification to all active subscriptions for a user. Returns sent count."""
+    """Send a push to all active subscriptions for a user. Returns sent count."""
     own_db = db is None
     if own_db:
         db = SessionLocal()
     try:
-        private_pem, _ = _get_or_create_vapid_keys(db)
+        private_b64, _ = _get_or_create_vapid_keys(db)
         subs = db.query(PushSubscription).filter(PushSubscription.user_id == user.id).all()
         sent = 0
         for sub in subs:
-            ok = _send_to_subscription(sub, title, body, url, private_pem, db)
-            if ok:
+            if _send_to_subscription(sub, title, body, url, private_b64, db):
                 sent += 1
         if own_db:
             db.commit()
         return sent
     except Exception as e:
-        logger.error(f"send_to_user error for user {user.id}: {e}")
+        logger.error("send_to_user error for user %d: %s", user.id, e)
         return 0
     finally:
         if own_db:
             db.close()
 
 
-def send_to_all(title: str, body: str, url: str = "/",
-                notif_filter: str = None) -> int:
+def send_to_all(title: str, body: str, url: str = "/", notif_filter: str = None) -> int:
     """
     Broadcast a push notification.
-    notif_filter: if set, only send to users where that column is True
-                  (e.g. 'notif_picks_reminder', 'notif_week_results')
-    Returns total sent count.
+    notif_filter: 'notif_picks_reminder' or 'notif_week_results' to respect user prefs.
+    Returns total subscriptions reached.
     """
     db = SessionLocal()
     try:
-        private_pem, _ = _get_or_create_vapid_keys(db)
+        private_b64, _ = _get_or_create_vapid_keys(db)
 
         query = db.query(User).filter(User.is_active == True)
         if notif_filter == "notif_picks_reminder":
@@ -145,18 +147,16 @@ def send_to_all(title: str, body: str, url: str = "/",
         elif notif_filter == "notif_week_results":
             query = query.filter(User.notif_week_results == True)
 
-        users = query.all()
         total = 0
-        for user in users:
+        for user in query.all():
             subs = db.query(PushSubscription).filter(PushSubscription.user_id == user.id).all()
             for sub in subs:
-                ok = _send_to_subscription(sub, title, body, url, private_pem, db)
-                if ok:
+                if _send_to_subscription(sub, title, body, url, private_b64, db):
                     total += 1
         db.commit()
         return total
     except Exception as e:
-        logger.error(f"send_to_all error: {e}")
+        logger.error("send_to_all error: %s", e)
         return 0
     finally:
         db.close()
