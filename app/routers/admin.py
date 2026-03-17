@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Season, Week, Game, Pick, User, Role, AuditLog, SpreadSource
+from app.models import Season, Week, Game, Pick, User, Role, AuditLog, SpreadSource, PushSubscription
 from app.auth import get_current_user, require_contributor, require_admin, hash_password
 from app.services import espn
 from app.services.scoring import update_game_results
@@ -372,6 +372,10 @@ async def admin_home(request: Request, db: Session = Depends(get_db)):
         .limit(20)
         .all()
     )
+    # How many push subscriptions each user has (for the notification sender)
+    sub_counts = {}
+    for row in db.query(PushSubscription.user_id).all():
+        sub_counts[row.user_id] = sub_counts.get(row.user_id, 0) + 1
 
     current_year = datetime.utcnow().year
     return templates.TemplateResponse(
@@ -382,9 +386,13 @@ async def admin_home(request: Request, db: Session = Depends(get_db)):
             "seasons": seasons,
             "season_weeks": season_weeks,
             "users": users,
+            "roles": Role,
+            "sub_counts": sub_counts,
             "recent_logs": recent_logs,
             "current_year": current_year,
             "historical_sync": request.query_params.get("historical_sync"),
+            "msg": request.query_params.get("msg"),
+            "error": request.query_params.get("error"),
         },
     )
 
@@ -688,18 +696,16 @@ async def save_user_picks(
 
 
 @router.get("/users", response_class=HTMLResponse)
-async def users_page(request: Request, db: Session = Depends(get_db)):
-    user = get_current_user(request, db)
-    if not user or user.role != Role.admin:
-        return RedirectResponse(url="/", status_code=303)
-
-    users = db.query(User).order_by(User.last_name, User.first_name).all()
-    error = request.query_params.get("error")
-    msg = request.query_params.get("msg")
-    return templates.TemplateResponse(
-        "admin/users.html",
-        {"request": request, "user": user, "users": users, "roles": Role, "error": error, "msg": msg},
-    )
+async def users_page(request: Request):
+    # Users management is now inline on the admin home page
+    msg = request.query_params.get("msg", "")
+    error = request.query_params.get("error", "")
+    qs = ""
+    if msg:
+        qs = f"?msg={msg}"
+    elif error:
+        qs = f"?error={error}"
+    return RedirectResponse(url=f"/admin/{qs}", status_code=303)
 
 
 @router.post("/users/add")
@@ -717,7 +723,7 @@ async def add_user(
 
     email = email.strip().lower()
     if db.query(User).filter(User.email == email).first():
-        return RedirectResponse(url="/admin/users?error=Email+already+registered", status_code=303)
+        return RedirectResponse(url="/admin/?error=Email+already+registered", status_code=303)
 
     new_user = User(
         first_name=first_name.strip(),
@@ -737,7 +743,7 @@ async def add_user(
         detail=f"Created player account for {new_user.full_name} ({email})",
     ))
     db.commit()
-    return RedirectResponse(url="/admin/users", status_code=303)
+    return RedirectResponse(url="/admin/", status_code=303)
 
 
 @router.post("/users/{user_id}/role")
@@ -768,7 +774,7 @@ async def update_user_role(
     )
     db.add(log)
     db.commit()
-    return RedirectResponse(url="/admin/users", status_code=303)
+    return RedirectResponse(url="/admin/", status_code=303)
 
 
 @router.post("/users/{user_id}/toggle")
@@ -787,7 +793,7 @@ async def toggle_user(
 
     target.is_active = not target.is_active
     db.commit()
-    return RedirectResponse(url="/admin/users", status_code=303)
+    return RedirectResponse(url="/admin/", status_code=303)
 
 
 @router.post("/users/{user_id}/reset-password")
@@ -805,7 +811,7 @@ async def reset_user_password(
     if not target:
         raise HTTPException(status_code=404)
     if len(new_password) < 8:
-        return RedirectResponse(url="/admin/users?error=Password+must+be+at+least+8+characters", status_code=303)
+        return RedirectResponse(url="/admin/?error=Password+must+be+at+least+8+characters", status_code=303)
 
     target.password_hash = hash_password(new_password)
     db.add(AuditLog(
@@ -816,4 +822,43 @@ async def reset_user_password(
         detail=f"Password reset for {target.full_name}",
     ))
     db.commit()
-    return RedirectResponse(url="/admin/users?msg=Password+reset+successfully", status_code=303)
+    return RedirectResponse(url="/admin/?msg=Password+reset+successfully", status_code=303)
+
+
+@router.post("/notify")
+async def send_notification(
+    request: Request,
+    title: str = Form(...),
+    body: str = Form(...),
+    url: str = Form("/"),
+    target: str = Form("all"),   # "all" or "select"
+    db: Session = Depends(get_db),
+):
+    admin = get_current_user(request, db)
+    if not admin or admin.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    from app.services.notifications import send_to_all, send_to_user
+    from urllib.parse import quote
+
+    if target == "all":
+        sent = send_to_all(title=title, body=body, url=url)
+    else:
+        form = await request.form()
+        user_ids = [int(v) for v in form.getlist("user_ids") if v.isdigit()]
+        sent = 0
+        for uid in user_ids:
+            u = db.query(User).filter(User.id == uid).first()
+            if u:
+                sent += send_to_user(user=u, title=title, body=body, url=url, db=db)
+
+    db.add(AuditLog(
+        user_id=admin.id,
+        action="send_notification",
+        detail=f"Push sent to {'all' if target == 'all' else str(len(user_ids))} users — \"{title}\" ({sent} subscriptions reached)",
+    ))
+    db.commit()
+    return RedirectResponse(
+        url=f"/admin/?msg={quote(f'Notification sent to {sent} subscription(s)')}",
+        status_code=303,
+    )
