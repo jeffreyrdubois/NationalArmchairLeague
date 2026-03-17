@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Season, Week, Game, Pick, User, Role, AuditLog, SpreadSource, PushSubscription
+from app.models import Season, Week, Game, Pick, User, Role, AuditLog, SpreadSource, PushSubscription, Transaction, AppSetting
 from app.auth import get_current_user, require_contributor, require_admin, hash_password
 from app.services import espn
 from app.services.scoring import update_game_results
@@ -823,6 +823,151 @@ async def reset_user_password(
     ))
     db.commit()
     return RedirectResponse(url="/admin/?msg=Password+reset+successfully", status_code=303)
+
+
+def _get_fund_settings(db: Session) -> dict:
+    rows = {r.key: r.value for r in db.query(AppSetting).filter(
+        AppSetting.key.in_(["entry_fee", "payment_venmo", "payment_paypal", "payment_cashapp", "payment_zelle"])
+    ).all()}
+    return {
+        "entry_fee": float(rows.get("entry_fee") or 0),
+        "venmo":     rows.get("payment_venmo", ""),
+        "paypal":    rows.get("payment_paypal", ""),
+        "cashapp":   rows.get("payment_cashapp", ""),
+        "zelle":     rows.get("payment_zelle", ""),
+    }
+
+
+@router.get("/funds", response_class=HTMLResponse)
+async def funds_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        return RedirectResponse(url="/", status_code=303)
+
+    settings = _get_fund_settings(db)
+    entry_fee = settings["entry_fee"]
+
+    users = db.query(User).filter(User.is_active == True).order_by(User.last_name, User.first_name).all()
+
+    user_stats = []
+    for u in users:
+        txns = db.query(Transaction).filter(Transaction.user_id == u.id).all()
+        paid_in  = sum(t.amount for t in txns if t.direction == "in")
+        received = sum(t.amount for t in txns if t.direction == "out")
+        user_stats.append({
+            "user":     u,
+            "paid_in":  paid_in,
+            "received": received,
+            "balance":  entry_fee - paid_in,
+        })
+
+    all_transactions = (
+        db.query(Transaction)
+        .order_by(Transaction.created_at.desc())
+        .all()
+    )
+
+    return templates.TemplateResponse("admin/funds.html", {
+        "request":           request,
+        "user":              user,
+        "settings":          settings,
+        "entry_fee":         entry_fee,
+        "user_stats":        user_stats,
+        "all_transactions":  all_transactions,
+        "total_pool":        entry_fee * len(users),
+        "total_collected":   sum(s["paid_in"]  for s in user_stats),
+        "total_outstanding": sum(max(0, s["balance"]) for s in user_stats),
+        "total_paid_out":    sum(s["received"] for s in user_stats),
+        "users":             users,
+        "msg":   request.query_params.get("msg"),
+        "error": request.query_params.get("error"),
+    })
+
+
+@router.post("/funds/settings")
+async def update_fund_settings(
+    request: Request,
+    entry_fee: float = Form(0.0),
+    payment_venmo:   str = Form(""),
+    payment_paypal:  str = Form(""),
+    payment_cashapp: str = Form(""),
+    payment_zelle:   str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    db.merge(AppSetting(key="entry_fee",        value=str(entry_fee)))
+    db.merge(AppSetting(key="payment_venmo",    value=payment_venmo.strip()))
+    db.merge(AppSetting(key="payment_paypal",   value=payment_paypal.strip()))
+    db.merge(AppSetting(key="payment_cashapp",  value=payment_cashapp.strip()))
+    db.merge(AppSetting(key="payment_zelle",    value=payment_zelle.strip()))
+    db.add(AuditLog(
+        user_id=user.id, action="update_fund_settings",
+        detail=f"Entry fee set to ${entry_fee:.2f}",
+    ))
+    db.commit()
+    return RedirectResponse(url="/admin/funds?msg=Settings+saved", status_code=303)
+
+
+@router.post("/funds/transaction")
+async def log_transaction(
+    request: Request,
+    user_id:   int   = Form(...),
+    amount:    float = Form(...),
+    direction: str   = Form(...),
+    note:      str   = Form(""),
+    db: Session = Depends(get_db),
+):
+    admin = get_current_user(request, db)
+    if not admin or admin.role != Role.admin:
+        raise HTTPException(status_code=403)
+    if direction not in ("in", "out"):
+        raise HTTPException(status_code=400, detail="Invalid direction")
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404)
+
+    db.add(Transaction(
+        user_id=user_id, amount=amount, direction=direction,
+        note=note.strip() or None, logged_by_id=admin.id,
+    ))
+    verb = "received from" if direction == "in" else "paid to"
+    db.add(AuditLog(
+        user_id=admin.id, action="log_transaction",
+        target_type="user", target_id=user_id,
+        detail=f"${amount:.2f} {verb} {target.full_name}" + (f" — {note}" if note.strip() else ""),
+    ))
+    db.commit()
+    return RedirectResponse(url="/admin/funds", status_code=303)
+
+
+@router.post("/funds/transaction/{txn_id}/delete")
+async def delete_transaction(
+    request: Request,
+    txn_id: int,
+    db: Session = Depends(get_db),
+):
+    admin = get_current_user(request, db)
+    if not admin or admin.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    txn = db.query(Transaction).filter(Transaction.id == txn_id).first()
+    if not txn:
+        raise HTTPException(status_code=404)
+
+    db.add(AuditLog(
+        user_id=admin.id, action="delete_transaction",
+        target_type="user", target_id=txn.user_id,
+        detail=f"Deleted ${txn.amount:.2f} {'in' if txn.direction == 'in' else 'out'} for user {txn.user_id}",
+    ))
+    db.delete(txn)
+    db.commit()
+    return RedirectResponse(url="/admin/funds", status_code=303)
 
 
 @router.post("/notify")
