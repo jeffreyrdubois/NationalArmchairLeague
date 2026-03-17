@@ -185,6 +185,19 @@ class AppSetting(Base):
     value = Column(Text, nullable=False)
 
 
+class PlayoffTeam(Base):
+    """Teams that made the playoffs for a given season (used by Bottom Feeder award)."""
+    __tablename__ = "playoff_teams"
+
+    id = Column(Integer, primary_key=True, index=True)
+    season_id = Column(Integer, ForeignKey("seasons.id"), nullable=False)
+    team_abbreviation = Column(String(10), nullable=False)
+
+    __table_args__ = (UniqueConstraint("season_id", "team_abbreviation"),)
+
+    season = relationship("Season")
+
+
 class Transaction(Base):
     """League fund transactions — entry fee payments in and prize payouts out."""
     __tablename__ = "transactions"

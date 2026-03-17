@@ -47,4 +47,7 @@ def _migrate():
         if "notif_week_results" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN notif_week_results BOOLEAN DEFAULT 1"))
 
+        # --- playoff_teams table (created by create_all; no ALTER needed) ---
+        # create_all handles new tables automatically; this comment anchors future migrations.
+
         conn.commit()
