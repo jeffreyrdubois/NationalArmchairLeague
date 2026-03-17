@@ -6,7 +6,7 @@ from pathlib import Path
 import logging
 
 from app.database import init_db
-from app.routers import auth, picks, dashboard, admin
+from app.routers import auth, picks, dashboard, admin, awards
 from app.routers import push
 from app.services.scheduler import setup_scheduler, scheduler
 from app.services.notifications import init_vapid_keys
@@ -37,6 +37,7 @@ app.include_router(auth.router)
 app.include_router(picks.router)
 app.include_router(dashboard.router)
 app.include_router(admin.router)
+app.include_router(awards.router)
 app.include_router(push.router)
 
 

@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Awards &mdash; NAL{% endblock %}
+{% block content %}
+
+<div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+  <h1 class="text-2xl font-bold">{{ season.year }} Awards</h1>
+  <div class="flex gap-2 flex-wrap">
+    {% for s in all_seasons %}
+    <a href="/awards?season_year={{ s.year }}"
+       class="px-3 py-1 rounded text-sm
+         {% if s.id == season.id %}bg-yellow-400 text-gray-900 font-bold
+         {% else %}bg-white border text-gray-600 hover:bg-gray-50{% endif %}">
+      {{ s.year }}
+    </a>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Award cards grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+  {% for result in award_results %}
+  {% set cfg = result.config %}
+  {% set ranking = result.ranking %}
+  <div class="bg-white rounded-xl shadow p-5 flex flex-col gap-4">
+
+    <!-- Award header -->
+    <div>
+      <h2 class="text-lg font-bold text-gray-900">{{ cfg.name }}</h2>
+      <p class="text-xs text-gray-500 mt-1">{{ cfg.description }}</p>
+    </div>
+
+    <!-- Rankings table -->
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-xs text-gray-400 uppercase border-b">
+            <th class="text-left pb-2 pr-4">#</th>
+            <th class="text-left pb-2 pr-4">Player</th>
+            <th class="text-right pb-2">
+              {% if cfg.aggregation.value == "count" %}Games
+              {% elif cfg.aggregation.value == "sum" %}Points
+              {% elif cfg.aggregation.value == "complete_sets" %}Sets
+              {% else %}Score{% endif %}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if ranking %}
+            {% for row in ranking %}
+            <tr class="border-t {% if row.user.id == user.id %}bg-yellow-50{% endif %}">
+              <td class="py-2 pr-4">
+                {% if row.rank == 1 and row.score > 0 %}
+                  <span class="text-base">&#127941;</span>
+                {% else %}
+                  <span class="text-gray-400">{{ row.rank }}</span>
+                {% endif %}
+              </td>
+              <td class="py-2 pr-4">
+                <a href="/profile/{{ row.user.id }}" class="hover:underline font-medium">
+                  {{ row.user.first_name }} {{ row.user.last_name }}
+                </a>
+              </td>
+              <td class="py-2 text-right font-bold
+                {% if row.rank == 1 and row.score > 0 %}text-yellow-500{% endif %}">
+                {% if cfg.aggregation.value == "sum" %}
+                  {{ "%.1f"|format(row.score) }}
+                {% else %}
+                  {{ row.score|int }}
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="3" class="py-4 text-center text-gray-400 text-xs">
+                No finalized games yet.
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Admin: Playoff Teams (Bottom Feeder) -->
+{% if user.role in ('admin',) %}
+<div class="bg-white rounded-xl shadow p-5">
+  <h2 class="font-bold text-lg mb-1">Playoff Teams &mdash; {{ season.year }}</h2>
+  <p class="text-xs text-gray-500 mb-4">
+    These teams are used by the <strong>Bottom Feeder</strong> award. Players who
+    correctly picked a team <em>not</em> on this list earn points toward that award.
+  </p>
+
+  <!-- Current list -->
+  {% if playoff_teams %}
+  <div class="flex flex-wrap gap-2 mb-4">
+    {% for team in playoff_teams %}
+    <form method="post" action="/admin/awards/playoff-teams/remove" class="inline">
+      <input type="hidden" name="season_id" value="{{ season.id }}" />
+      <input type="hidden" name="team_abbreviation" value="{{ team }}" />
+      <button type="submit"
+              class="flex items-center gap-1 px-2 py-1 text-xs font-mono bg-gray-100
+                     border rounded hover:bg-red-50 hover:border-red-300 hover:text-red-700">
+        {{ team }} &times;
+      </button>
+    </form>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-xs text-gray-400 mb-4">No playoff teams set yet.</p>
+  {% endif %}
+
+  <!-- Add team -->
+  <form method="post" action="/admin/awards/playoff-teams/add"
+        class="flex items-center gap-2">
+    <input type="hidden" name="season_id" value="{{ season.id }}" />
+    <input type="text" name="team_abbreviation" placeholder="e.g. KC"
+           maxlength="10" required
+           class="border rounded px-3 py-1.5 text-sm font-mono uppercase w-24
+                  focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+    <button type="submit"
+            class="px-3 py-1.5 text-sm bg-yellow-400 text-gray-900 font-semibold
+                   rounded hover:bg-yellow-300">
+      Add Team
+    </button>
+  </form>
+</div>
+{% endif %}
+
+{% endblock %}

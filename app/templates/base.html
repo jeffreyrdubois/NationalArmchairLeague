@@ -35,6 +35,7 @@
           <a href="/" class="text-sm hover:text-yellow-300 transition">Dashboard</a>
           <a href="/picks" class="text-sm hover:text-yellow-300 transition">My Picks</a>
           <a href="/standings" class="text-sm hover:text-yellow-300 transition">Standings</a>
+          <a href="/awards" class="text-sm hover:text-yellow-300 transition">Awards</a>
           {% if user.role in ('contributor', 'admin') %}
           <div class="relative group">
             <button class="text-sm hover:text-yellow-300 transition">Manage ▾</button>
@@ -90,6 +91,7 @@
           <a href="/" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Dashboard</a>
           <a href="/picks" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">My Picks</a>
           <a href="/standings" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Standings</a>
+          <a href="/awards" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Awards</a>
           {% if user.role in ('contributor', 'admin') %}
           <a href="/admin/spreads" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Manage → Spreads</a>
           <a href="/admin/scores" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Manage → Scores</a>
