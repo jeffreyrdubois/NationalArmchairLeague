@@ -100,7 +100,8 @@ def _send_to_subscription(sub: PushSubscription, title: str, body: str, url: str
         return True
     except WebPushException as e:
         status = e.response.status_code if e.response is not None else None
-        if status in (404, 410):
+        if status in (404, 410, 403):
+            # 404/410 = endpoint gone; 403 = VAPID key mismatch (stale subscription)
             if db:
                 db.delete(sub)
             return False
