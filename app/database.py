@@ -33,7 +33,18 @@ def init_db():
 def _migrate():
     """Apply incremental schema changes that create_all won't handle on existing tables."""
     with engine.connect() as conn:
-        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(weeks)")).fetchall()}
-        if "picks_lock_override" not in existing:
+        # --- weeks table ---
+        week_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(weeks)")).fetchall()}
+        if "picks_lock_override" not in week_cols:
             conn.execute(text("ALTER TABLE weeks ADD COLUMN picks_lock_override BOOLEAN DEFAULT 0"))
-            conn.commit()
+        if "picks_reminder_sent" not in week_cols:
+            conn.execute(text("ALTER TABLE weeks ADD COLUMN picks_reminder_sent BOOLEAN DEFAULT 0"))
+
+        # --- users table ---
+        user_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(users)")).fetchall()}
+        if "notif_picks_reminder" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN notif_picks_reminder BOOLEAN DEFAULT 1"))
+        if "notif_week_results" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN notif_week_results BOOLEAN DEFAULT 1"))
+
+        conn.commit()

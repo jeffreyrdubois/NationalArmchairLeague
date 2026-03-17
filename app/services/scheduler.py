@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
-from app.models import Season, Week, Game, SpreadSource
+from app.models import Season, Week, Game, SpreadSource, Pick, User
 from app.services import espn, odds, scoring
 
 logger = logging.getLogger(__name__)
@@ -70,6 +70,18 @@ async def sync_scores():
             week.is_completed = True
             db.commit()
             logger.info(f"Week {week.week_number} is now completed")
+            # Fire week-results push notifications
+            try:
+                from app.services.notifications import send_to_all
+                sent = send_to_all(
+                    title="Week Results Are In!",
+                    body=f"Week {week.week_number} is complete — check the standings.",
+                    url="/standings",
+                    notif_filter="notif_week_results",
+                )
+                logger.info(f"Sent week-results push to {sent} subscriptions")
+            except Exception as ne:
+                logger.warning(f"Week-results push error: {ne}")
 
     except Exception as e:
         logger.error(f"Score sync error: {e}")
@@ -217,6 +229,65 @@ async def enforce_locks():
         db.close()
 
 
+async def send_picks_reminders():
+    """
+    Two hours before picks lock, push a reminder to users who haven't
+    submitted all their picks yet.  Fires at most once per week.
+    """
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        window_start = now
+        window_end = now + timedelta(hours=2)
+
+        weeks = (
+            db.query(Week)
+            .filter(
+                Week.is_completed == False,
+                Week.picks_reminder_sent == False,
+                Week.first_kickoff != None,
+                Week.first_kickoff > window_start,
+                Week.first_kickoff <= window_end,
+            )
+            .all()
+        )
+        for week in weeks:
+            game_count = db.query(Game).filter(Game.week_id == week.id).count()
+            if game_count == 0:
+                continue
+
+            # Collect users who haven't submitted a full set of picks
+            all_users = db.query(User).filter(User.is_active == True,
+                                              User.notif_picks_reminder == True).all()
+            targets = []
+            for u in all_users:
+                pick_count = db.query(Pick).filter(
+                    Pick.user_id == u.id, Pick.week_id == week.id
+                ).count()
+                if pick_count < game_count:
+                    targets.append(u)
+
+            if targets:
+                from app.services.notifications import send_to_all, send_to_user
+                for u in targets:
+                    send_to_user(
+                        user=u,
+                        title="Picks close soon!",
+                        body=f"Week {week.week_number} picks lock in under 2 hours.",
+                        url="/picks",
+                        db=db,
+                    )
+                logger.info(f"Sent picks reminder for week {week.week_number} to {len(targets)} users")
+
+            week.picks_reminder_sent = True
+        db.commit()
+    except Exception as e:
+        logger.error(f"Picks reminder error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
 async def sync_historical_season(season_id: int, season_year: int, total_weeks: int = 18):
     """
     Populate games for every week of a historical season from ESPN.
@@ -250,5 +321,7 @@ def setup_scheduler():
     scheduler.add_job(sync_spreads, IntervalTrigger(hours=4), id="sync_spreads", replace_existing=True)
     # Lock enforcement: every minute
     scheduler.add_job(enforce_locks, IntervalTrigger(minutes=1), id="enforce_locks", replace_existing=True)
+    # Picks reminder push: every 5 minutes (low cost; only fires once per week)
+    scheduler.add_job(send_picks_reminders, IntervalTrigger(minutes=5), id="picks_reminders", replace_existing=True)
     scheduler.start()
     logger.info("Scheduler started")

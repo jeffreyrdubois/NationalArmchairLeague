@@ -29,9 +29,13 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     role = Column(SAEnum(Role), default=Role.player, nullable=False)
     is_active = Column(Boolean, default=True)
+    # Notification preferences (all on by default)
+    notif_picks_reminder = Column(Boolean, default=True)   # 2 hrs before picks lock
+    notif_week_results = Column(Boolean, default=True)     # when week is scored
     created_at = Column(DateTime, server_default=func.now())
 
     picks = relationship("Pick", back_populates="user")
+    push_subscriptions = relationship("PushSubscription", back_populates="user", cascade="all, delete-orphan")
 
     @property
     def full_name(self):
@@ -60,6 +64,7 @@ class Week(Base):
     spread_lock_time = Column(DateTime)       # 24h before first kickoff
     is_picks_locked = Column(Boolean, default=False)
     picks_lock_override = Column(Boolean, default=False)  # admin manually unlocked; skip auto-relock
+    picks_reminder_sent = Column(Boolean, default=False)  # push notification sent for this week
     is_spreads_locked = Column(Boolean, default=False)
     is_completed = Column(Boolean, default=False)
     espn_week = Column(Integer)               # ESPN API week number
@@ -156,3 +161,25 @@ class AuditLog(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     user = relationship("User")
+
+
+class PushSubscription(Base):
+    """Browser Web Push subscriptions — one row per browser/device."""
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    endpoint = Column(Text, unique=True, nullable=False)
+    p256dh = Column(Text, nullable=False)    # browser public key
+    auth_key = Column(Text, nullable=False)  # browser auth secret
+    created_at = Column(DateTime, server_default=func.now())
+
+    user = relationship("User", back_populates="push_subscriptions")
+
+
+class AppSetting(Base):
+    """Generic key/value store for app-wide configuration (e.g. VAPID keys)."""
+    __tablename__ = "app_settings"
+
+    key = Column(String(100), primary_key=True)
+    value = Column(Text, nullable=False)

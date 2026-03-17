@@ -63,6 +63,7 @@
               {{ user.role.value | title }}
             </span>
           </a>
+          <a href="/settings" class="hidden sm:inline text-sm text-gray-400 hover:text-white" title="Account Settings">⚙</a>
           <a href="/logout" class="hidden sm:inline text-sm text-gray-400 hover:text-white">Logout</a>
           <!-- Mobile: hamburger -->
           <button id="nav-toggle" class="sm:hidden p-2 rounded hover:bg-gray-700 focus:outline-none" aria-label="Open menu">
@@ -95,6 +96,7 @@
           <a href="/admin/" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Admin Panel</a>
           {% endif %}
           {% endif %}
+          <a href="/settings" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Settings</a>
           <div class="border-t border-gray-700 mt-2 pt-2 flex items-center justify-between px-2">
             <a href="/profile/{{ user.id }}" class="text-sm text-gray-300 hover:text-white flex items-center gap-1.5">
               {{ user.first_name }} {{ user.last_name }}
@@ -134,6 +136,16 @@
     Picks saved successfully!
   </div>
   {% endif %}
+  {% if request.query_params.get('msg') %}
+  <div class="bg-green-100 border border-green-400 text-green-800 px-4 py-3 text-center text-sm">
+    {{ request.query_params.get('msg') }}
+  </div>
+  {% endif %}
+  {% if request.query_params.get('error') %}
+  <div class="bg-red-100 border border-red-400 text-red-800 px-4 py-3 text-center text-sm">
+    {{ request.query_params.get('error') }}
+  </div>
+  {% endif %}
 
   <!-- Main content -->
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -143,5 +155,18 @@
   <footer class="mt-16 py-6 text-center text-xs text-gray-400">
     National Armchair League &mdash; Pick em' &amp; win em'
   </footer>
+
+  {% if user %}
+  <script>
+    // Register the service worker so push notifications work site-wide
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/static/js/sw.js').catch(function(e) {
+        console.warn('Service worker registration failed:', e);
+      });
+    }
+  </script>
+  {% endif %}
+
+  {% block extra_scripts %}{% endblock %}
 </body>
 </html>

@@ -11,3 +11,4 @@ apscheduler==3.10.4
 itsdangerous==2.2.0
 starlette==0.38.4
 aiosqlite==0.20.0
+pywebpush==2.0.0

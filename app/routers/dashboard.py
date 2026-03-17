@@ -1,11 +1,11 @@
 from app.templates_config import templates
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Request, Depends, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
 
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Season, Week, Game, Pick, User
-from app.auth import get_current_user
+from app.models import Season, Week, Game, Pick, User, PushSubscription
+from app.auth import get_current_user, verify_password, hash_password
 from app.services.scoring import get_week_standings, get_season_standings
 
 router = APIRouter()
@@ -185,3 +185,65 @@ async def user_profile(
             "picks_by_week": picks_by_week,
         },
     )
+
+
+@router.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    subscriptions = db.query(PushSubscription).filter(PushSubscription.user_id == user.id).all()
+    msg = request.query_params.get("msg")
+    error = request.query_params.get("error")
+    return templates.TemplateResponse(
+        "account/settings.html",
+        {
+            "request": request,
+            "user": user,
+            "subscriptions": subscriptions,
+            "msg": msg,
+            "error": error,
+        },
+    )
+
+
+@router.post("/settings/notifications")
+async def save_notification_prefs(
+    request: Request,
+    notif_picks_reminder: str = Form(None),
+    notif_week_results: str = Form(None),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    user.notif_picks_reminder = notif_picks_reminder == "on"
+    user.notif_week_results = notif_week_results == "on"
+    db.commit()
+    return RedirectResponse(url="/settings?msg=Notification+preferences+saved", status_code=303)
+
+
+@router.post("/settings/change-password")
+async def change_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    if not verify_password(current_password, user.password_hash):
+        return RedirectResponse(url="/settings?error=Current+password+is+incorrect", status_code=303)
+    if len(new_password) < 8:
+        return RedirectResponse(url="/settings?error=New+password+must+be+at+least+8+characters", status_code=303)
+    if new_password != confirm_password:
+        return RedirectResponse(url="/settings?error=New+passwords+do+not+match", status_code=303)
+
+    user.password_hash = hash_password(new_password)
+    db.commit()
+    return RedirectResponse(url="/settings?msg=Password+changed+successfully", status_code=303)
