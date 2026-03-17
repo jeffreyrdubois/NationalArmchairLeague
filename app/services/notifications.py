@@ -14,22 +14,21 @@ from app.models import AppSetting, PushSubscription, User
 logger = logging.getLogger(__name__)
 
 
-def _get_or_create_vapid_keys(db: Session) -> tuple[str, str]:
-    """Return (private_key_pem, public_key_base64url), generating them if needed."""
-    priv_row = db.query(AppSetting).filter(AppSetting.key == "vapid_private_key").first()
-    pub_row = db.query(AppSetting).filter(AppSetting.key == "vapid_public_key").first()
+def _generate_vapid_keys(db: Session) -> tuple[str, str]:
+    """Generate a fresh VAPID key pair, store it, and return (private_pem, public_b64url)."""
+    from cryptography.hazmat.primitives.asymmetric.ec import generate_private_key, SECP256R1
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding, PublicFormat, PrivateFormat, NoEncryption,
+    )
 
-    if priv_row and pub_row:
-        return priv_row.value, pub_row.value
-
-    # Generate a new VAPID key pair
-    from py_vapid import Vapid
-    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-
-    vapid = Vapid()
-    vapid.generate_keys()
-    private_pem = vapid.private_pem().decode("utf-8")
-    pub_bytes = vapid.public_key.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+    private_key = generate_private_key(SECP256R1())
+    # TraditionalOpenSSL → "-----BEGIN EC PRIVATE KEY-----" (SEC1, named curve)
+    private_pem = private_key.private_bytes(
+        Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption()
+    ).decode("utf-8")
+    pub_bytes = private_key.public_key().public_bytes(
+        Encoding.X962, PublicFormat.UncompressedPoint
+    )
     public_b64 = base64.urlsafe_b64encode(pub_bytes).rstrip(b"=").decode("utf-8")
 
     db.merge(AppSetting(key="vapid_private_key", value=private_pem))
@@ -37,6 +36,26 @@ def _get_or_create_vapid_keys(db: Session) -> tuple[str, str]:
     db.commit()
     logger.info("Generated new VAPID key pair and stored in app_settings")
     return private_pem, public_b64
+
+
+def _get_or_create_vapid_keys(db: Session) -> tuple[str, str]:
+    """Return (private_key_pem, public_key_base64url), generating them if needed."""
+    priv_row = db.query(AppSetting).filter(AppSetting.key == "vapid_private_key").first()
+    pub_row = db.query(AppSetting).filter(AppSetting.key == "vapid_public_key").first()
+
+    if priv_row and pub_row:
+        # Verify the stored key is actually loadable before trusting it
+        try:
+            from cryptography.hazmat.primitives.serialization import load_pem_private_key
+            load_pem_private_key(priv_row.value.encode("utf-8"), password=None)
+            return priv_row.value, pub_row.value
+        except Exception:
+            logger.warning("Stored VAPID private key is unreadable — regenerating")
+            db.delete(priv_row)
+            db.delete(pub_row)
+            db.commit()
+
+    return _generate_vapid_keys(db)
 
 
 def get_vapid_public_key() -> str:
@@ -49,7 +68,7 @@ def get_vapid_public_key() -> str:
 
 
 def init_vapid_keys():
-    """Called at startup to ensure VAPID keys exist."""
+    """Called at startup to ensure valid VAPID keys exist."""
     db = SessionLocal()
     try:
         _get_or_create_vapid_keys(db)
