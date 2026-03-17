@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_admin
+from app.auth import get_current_user, require_contributor
 from app.database import get_db
 from app.models import PlayoffTeam, Season, User
 from app.services.awards import AWARD_REGISTRY, compute_all_awards, rank_award
@@ -93,7 +93,7 @@ async def add_playoff_team(
     team_abbreviation: str = Form(...),
     db: Session = Depends(get_db),
 ):
-    admin = require_admin(request, db)
+    admin = require_contributor(request, db)
     team = team_abbreviation.strip().upper()
     if team:
         existing = (
@@ -117,7 +117,7 @@ async def remove_playoff_team(
     team_abbreviation: str = Form(...),
     db: Session = Depends(get_db),
 ):
-    admin = require_admin(request, db)
+    admin = require_contributor(request, db)
     db.query(PlayoffTeam).filter_by(
         season_id=season_id, team_abbreviation=team_abbreviation
     ).delete()

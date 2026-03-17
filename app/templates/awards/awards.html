@@ -86,7 +86,7 @@
 </div>
 
 <!-- Admin: Playoff Teams (Bottom Feeder) -->
-{% if user.role in ('admin',) %}
+{% if user.role in ('contributor', 'admin') %}
 <div class="bg-white rounded-xl shadow p-5">
   <h2 class="font-bold text-lg mb-1">Playoff Teams &mdash; {{ season.year }}</h2>
   <p class="text-xs text-gray-500 mb-4">
