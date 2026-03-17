@@ -57,23 +57,35 @@
         {% elif game.is_in_progress %}<span class="ml-2 text-green-600 live-pulse">Live</span>{% endif %}
       </div>
     </div>
-    <form method="post" action="/admin/scores/update" class="flex flex-wrap items-center gap-3">
-      <input type="hidden" name="game_id" value="{{ game.id }}" />
-      <input type="hidden" name="redirect_week_id" value="{{ current_week.id }}" />
-      <label class="text-sm text-gray-600">{{ game.away_team }}</label>
-      <input name="away_score" type="number" min="0"
-        value="{{ game.away_score if game.away_score is not none else '' }}"
-        class="w-16 border rounded px-2 py-1 text-center font-bold" />
-      <span class="text-gray-400">-</span>
-      <input name="home_score" type="number" min="0"
-        value="{{ game.home_score if game.home_score is not none else '' }}"
-        class="w-16 border rounded px-2 py-1 text-center font-bold" />
-      <label class="text-sm text-gray-600">{{ game.home_team }}</label>
-      <label class="flex items-center gap-1 text-sm text-gray-600 ml-2">
-        <input name="is_final" type="checkbox" value="true" {% if game.is_final %}checked{% endif %} /> Final
-      </label>
-      <button class="bg-blue-600 text-white text-sm px-3 py-1 rounded hover:bg-blue-700">Save</button>
-    </form>
+    <div class="flex flex-wrap items-center gap-3">
+      <form method="post" action="/admin/scores/update" class="flex flex-wrap items-center gap-3">
+        <input type="hidden" name="game_id" value="{{ game.id }}" />
+        <input type="hidden" name="redirect_week_id" value="{{ current_week.id }}" />
+        <label class="text-sm text-gray-600">{{ game.away_team }}</label>
+        <input name="away_score" type="number" min="0"
+          value="{{ game.away_score if game.away_score is not none else '' }}"
+          class="w-16 border rounded px-2 py-1 text-center font-bold" />
+        <span class="text-gray-400">-</span>
+        <input name="home_score" type="number" min="0"
+          value="{{ game.home_score if game.home_score is not none else '' }}"
+          class="w-16 border rounded px-2 py-1 text-center font-bold" />
+        <label class="text-sm text-gray-600">{{ game.home_team }}</label>
+        <label class="flex items-center gap-1 text-sm text-gray-600 ml-2">
+          <input name="is_final" type="checkbox" value="true" {% if game.is_final %}checked{% endif %} /> Final
+        </label>
+        <button class="bg-blue-600 text-white text-sm px-3 py-1 rounded hover:bg-blue-700">Save</button>
+      </form>
+      {% if game.home_score is not none or game.away_score is not none %}
+      <form method="post" action="/admin/scores/clear">
+        <input type="hidden" name="game_id" value="{{ game.id }}" />
+        <input type="hidden" name="redirect_week_id" value="{{ current_week.id }}" />
+        <button class="text-sm text-red-600 hover:text-red-800 hover:underline"
+                onclick="return confirm('Clear score and reset all picks for this game to pending?')">
+          Clear score
+        </button>
+      </form>
+      {% endif %}
+    </div>
   </div>
   {% endfor %}
 </div>

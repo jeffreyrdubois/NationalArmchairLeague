@@ -258,12 +258,24 @@ async def update_spread(
     return RedirectResponse(url=dest, status_code=303)
 
 
+def _unscore_game(db: Session, game: Game) -> None:
+    """Reset a game and all its picks back to an unscored/pending state."""
+    game.home_score = None
+    game.away_score = None
+    game.is_final = False
+    game.is_in_progress = False
+    game.home_covered = None
+    for pick in db.query(Pick).filter(Pick.game_id == game.id).all():
+        pick.is_correct = None
+        pick.points_earned = None
+
+
 @router.post("/scores/update")
 async def update_score(
     request: Request,
     game_id: int = Form(...),
-    home_score: int = Form(...),
-    away_score: int = Form(...),
+    home_score: int | None = Form(None),
+    away_score: int | None = Form(None),
     is_final: bool = Form(False),
     redirect_week_id: int = Form(None),
     db: Session = Depends(get_db),
@@ -277,23 +289,62 @@ async def update_score(
         raise HTTPException(status_code=404, detail="Game not found")
 
     old_final = game.is_final
+    scores_cleared = home_score is None or away_score is None
+
+    # Cannot be final without scores
+    if scores_cleared:
+        is_final = False
+
+    # If game was final and is now being un-finaled, reset picks to pending
+    if old_final and (not is_final or scores_cleared):
+        _unscore_game(db, game)
+
     game.home_score = home_score
     game.away_score = away_score
     game.is_final = is_final
 
-    log = AuditLog(
+    db.add(AuditLog(
         user_id=user.id,
         action="update_score",
         target_type="game",
         target_id=game_id,
         detail=f"Score set to {away_score}@{home_score}, final={is_final}",
-    )
-    db.add(log)
+    ))
 
     if is_final and not old_final:
         update_game_results(db, game)
     else:
         db.commit()
+
+    dest = f"/admin/scores?week_id={redirect_week_id}" if redirect_week_id else "/admin/scores"
+    return RedirectResponse(url=dest, status_code=303)
+
+
+@router.post("/scores/clear")
+async def clear_score(
+    request: Request,
+    game_id: int = Form(...),
+    redirect_week_id: int = Form(None),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user or user.role not in (Role.contributor, Role.admin):
+        raise HTTPException(status_code=403)
+
+    game = db.query(Game).filter(Game.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    _unscore_game(db, game)
+
+    db.add(AuditLog(
+        user_id=user.id,
+        action="clear_score",
+        target_type="game",
+        target_id=game_id,
+        detail=f"Score cleared ({game.away_team}@{game.home_team})",
+    ))
+    db.commit()
 
     dest = f"/admin/scores?week_id={redirect_week_id}" if redirect_week_id else "/admin/scores"
     return RedirectResponse(url=dest, status_code=303)

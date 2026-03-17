@@ -1,0 +1,21 @@
+<form hx-post="/admin/awards/playoff-teams/toggle"
+      hx-target="this"
+      hx-swap="outerHTML">
+  <input type="hidden" name="season_id" value="{{ season_id }}" />
+  <input type="hidden" name="team_abbreviation" value="{{ abbr }}" />
+  <button type="submit"
+          title="{{ name }}"
+          class="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded border text-xs transition
+            {% if clinched %}
+              bg-green-50 border-green-400 text-green-800 hover:bg-green-100
+            {% else %}
+              bg-white border-gray-200 text-gray-500 hover:bg-gray-50
+            {% endif %}">
+    <span class="font-mono font-semibold tracking-wide">{{ abbr }}</span>
+    {% if clinched %}
+      <span class="font-medium">Clinched &#10003;</span>
+    {% else %}
+      <span class="text-gray-400">Eliminated</span>
+    {% endif %}
+  </button>
+</form>
