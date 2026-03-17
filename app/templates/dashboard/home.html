@@ -176,6 +176,67 @@
       {% endif %}
     </div>
 
+    <!-- League Finances -->
+    {% if fund_entry_fee > 0 or fund_my_paid_in > 0 or fund_my_received > 0 %}
+    <div class="bg-white rounded-xl shadow p-5">
+      <h2 class="font-semibold text-lg mb-3">League Finances</h2>
+
+      {% if fund_entry_fee > 0 %}
+      <div class="flex justify-between text-sm mb-1">
+        <span class="text-gray-600">Entry Fee</span>
+        <span class="font-semibold">${{ "%.2f" | format(fund_entry_fee) }}</span>
+      </div>
+      <div class="flex justify-between text-sm mb-3">
+        <span class="text-gray-600">Your Status</span>
+        {% if fund_my_balance <= 0 %}
+        <span class="font-semibold text-green-600">Paid &#10003;</span>
+        {% else %}
+        <span class="font-semibold text-red-600">Owes ${{ "%.2f" | format(fund_my_balance) }}</span>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if fund_my_received > 0 %}
+      <div class="flex justify-between text-sm mb-3">
+        <span class="text-gray-600">Received</span>
+        <span class="font-semibold text-blue-600">${{ "%.2f" | format(fund_my_received) }}</span>
+      </div>
+      {% endif %}
+
+      <!-- Payment quick-links (only when they still owe) -->
+      {% if fund_my_balance > 0 and (fund_payment.venmo or fund_payment.paypal or fund_payment.cashapp or fund_payment.zelle) %}
+      <div class="border-t pt-3 mt-1">
+        <p class="text-xs text-gray-500 mb-2">Send payment to commissioner:</p>
+        <div class="flex flex-wrap gap-2">
+          {% if fund_payment.venmo %}
+          <a href="https://venmo.com/u/{{ fund_payment.venmo }}" target="_blank" rel="noopener"
+            class="text-xs bg-blue-700 text-white px-3 py-1.5 rounded-lg hover:bg-blue-600 transition">
+            Venmo @{{ fund_payment.venmo }}
+          </a>
+          {% endif %}
+          {% if fund_payment.paypal %}
+          <a href="https://paypal.me/{{ fund_payment.paypal }}/{{ "%.2f" | format(fund_my_balance) }}" target="_blank" rel="noopener"
+            class="text-xs bg-blue-500 text-white px-3 py-1.5 rounded-lg hover:bg-blue-400 transition">
+            PayPal
+          </a>
+          {% endif %}
+          {% if fund_payment.cashapp %}
+          <a href="https://cash.app/${{ fund_payment.cashapp }}/{{ fund_my_balance|int }}" target="_blank" rel="noopener"
+            class="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-500 transition">
+            Cash App
+          </a>
+          {% endif %}
+          {% if fund_payment.zelle %}
+          <span class="text-xs bg-purple-100 text-purple-800 px-3 py-1.5 rounded-lg">
+            Zelle: {{ fund_payment.zelle }}
+          </span>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
   </div>
 </div>
 

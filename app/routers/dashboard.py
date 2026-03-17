@@ -4,7 +4,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Season, Week, Game, Pick, User, PushSubscription
+from app.models import Season, Week, Game, Pick, User, PushSubscription, Transaction, AppSetting
 from app.auth import get_current_user, verify_password, hash_password
 from app.services.scoring import get_week_standings, get_season_standings
 
@@ -66,6 +66,22 @@ async def home(request: Request, db: Session = Depends(get_db)):
         .all()
     )
 
+    # Fund summary for the current user
+    fund_rows = {r.key: r.value for r in db.query(AppSetting).filter(
+        AppSetting.key.in_(["entry_fee", "payment_venmo", "payment_paypal", "payment_cashapp", "payment_zelle"])
+    ).all()}
+    fund_entry_fee = float(fund_rows.get("entry_fee") or 0)
+    fund_payment = {
+        "venmo":   fund_rows.get("payment_venmo", ""),
+        "paypal":  fund_rows.get("payment_paypal", ""),
+        "cashapp": fund_rows.get("payment_cashapp", ""),
+        "zelle":   fund_rows.get("payment_zelle", ""),
+    }
+    my_txns = db.query(Transaction).filter(Transaction.user_id == user.id).all()
+    fund_my_paid_in  = sum(t.amount for t in my_txns if t.direction == "in")
+    fund_my_received = sum(t.amount for t in my_txns if t.direction == "out")
+    fund_my_balance  = fund_entry_fee - fund_my_paid_in
+
     return templates.TemplateResponse(
         "dashboard/home.html",
         {
@@ -78,6 +94,11 @@ async def home(request: Request, db: Session = Depends(get_db)):
             "week_standings": week_standings,
             "my_picks": {p.game_id: p for p in my_picks},
             "all_weeks": all_weeks,
+            "fund_entry_fee":  fund_entry_fee,
+            "fund_my_paid_in": fund_my_paid_in,
+            "fund_my_received": fund_my_received,
+            "fund_my_balance": fund_my_balance,
+            "fund_payment":    fund_payment,
         },
     )
 

@@ -183,3 +183,19 @@ class AppSetting(Base):
 
     key = Column(String(100), primary_key=True)
     value = Column(Text, nullable=False)
+
+
+class Transaction(Base):
+    """League fund transactions — entry fee payments in and prize payouts out."""
+    __tablename__ = "transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    amount = Column(Float, nullable=False)           # always positive
+    direction = Column(String(3), nullable=False)    # 'in' = player paid, 'out' = player received
+    note = Column(String(255))
+    created_at = Column(DateTime, server_default=func.now())
+    logged_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    user = relationship("User", foreign_keys=[user_id])
+    logged_by = relationship("User", foreign_keys=[logged_by_id])
