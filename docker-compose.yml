@@ -6,7 +6,9 @@ services:
     container_name: nal
     restart: unless-stopped
     ports:
-      - "8000:8000"         # Change left side if port 8000 is taken on your Unraid host
+      # External port defaults to 8000; override with HOST_PORT in .env (e.g. 5950).
+      # The container always listens on 8000 internally.
+      - "${HOST_PORT:-8000}:8000"
     volumes:
       - ./data:/app/data    # SQLite database persists here
     environment:
