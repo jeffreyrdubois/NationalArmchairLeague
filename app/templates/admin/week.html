@@ -11,6 +11,12 @@
         Sync from ESPN
       </button>
     </form>
+    <form method="post" action="/admin/week/{{ week.id }}/sync-odds">
+      <button class="bg-green-600 text-white text-sm px-3 py-1.5 rounded hover:bg-green-700"
+        title="Pull the latest DraftKings spreads from The Odds API (keeps manual overrides)">
+        Sync Odds
+      </button>
+    </form>
     {% if not week.is_spreads_locked %}
     <form method="post" action="/admin/week/{{ week.id }}/lock-spreads">
       <button class="bg-orange-500 text-white text-sm px-3 py-1.5 rounded hover:bg-orange-600"

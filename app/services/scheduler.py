@@ -205,6 +205,58 @@ async def sync_spreads():
         db.close()
 
 
+async def sync_week_spreads(week_id: int) -> tuple[int, str | None]:
+    """
+    Manually fetch spreads from The Odds API for a single week.
+    Mirrors sync_spreads() but targets one week and reports a count, for the
+    admin "Sync Odds" button. Returns (updated_count, error_message);
+    error_message is None on success. Manual spread overrides are preserved.
+    """
+    db = SessionLocal()
+    try:
+        week = db.query(Week).filter(Week.id == week_id).first()
+        if not week:
+            return 0, "Week not found"
+        season = db.query(Season).filter(Season.id == week.season_id).first()
+        if season and season.year == 9999:
+            return 0, "Cannot sync odds for the test season"
+
+        spread_data = await odds.fetch_nfl_spreads()
+        if not spread_data:
+            return 0, (
+                "No spreads returned — make sure ODDS_API_KEY is set, or The Odds "
+                "API may currently have no lines for these games (common in the "
+                "offseason)."
+            )
+
+        games = db.query(Game).filter(Game.week_id == week_id).all()
+        updated = 0
+        for game in games:
+            # Don't overwrite manual overrides
+            if game.spread_source == SpreadSource.manual and game.spread is not None:
+                continue
+            home_spread = odds.match_spread_to_game(
+                game.home_team_name or game.home_team,
+                game.away_team_name or game.away_team,
+                spread_data,
+            )
+            if home_spread is not None:
+                game.spread = home_spread
+                game.spread_source = SpreadSource.api
+                game.spread_updated_at = datetime.utcnow()
+                updated += 1
+
+        db.commit()
+        logger.info(f"Manual odds sync updated {updated} game(s) for week {week.week_number}")
+        return updated, None
+    except Exception as e:
+        logger.error(f"Manual spread sync error: {e}")
+        db.rollback()
+        return 0, str(e)
+    finally:
+        db.close()
+
+
 async def enforce_locks():
     """Check and enforce pick and spread locks based on time."""
     db = SessionLocal()
