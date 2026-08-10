@@ -36,6 +36,7 @@
           <a href="/picks" class="text-sm hover:text-yellow-300 transition">My Picks</a>
           <a href="/standings" class="text-sm hover:text-yellow-300 transition">Standings</a>
           <a href="/awards" class="text-sm hover:text-yellow-300 transition">Awards</a>
+          <a href="/feedback" class="text-sm hover:text-yellow-300 transition">Submit an Issue</a>
           {% if user.role in ('contributor', 'admin') %}
           <div class="relative group">
             <button class="text-sm hover:text-yellow-300 transition">Manage ▾</button>
@@ -92,6 +93,7 @@
           <a href="/picks" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">My Picks</a>
           <a href="/standings" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Standings</a>
           <a href="/awards" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Awards</a>
+          <a href="/feedback" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Submit an Issue</a>
           {% if user.role in ('contributor', 'admin') %}
           <a href="/admin/spreads" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Manage → Spreads</a>
           <a href="/admin/scores" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Manage → Scores</a>
@@ -158,6 +160,9 @@
 
   <footer class="mt-16 py-6 text-center text-xs text-gray-400">
     National Armchair League &mdash; Pick em' &amp; win em'
+    {% if user %}
+    &middot; <a href="/feedback" class="underline hover:text-gray-600">Submit an Issue</a>
+    {% endif %}
   </footer>
 
   {% if user %}

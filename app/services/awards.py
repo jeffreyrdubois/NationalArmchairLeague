@@ -19,6 +19,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.utils import to_eastern
+
 from app.models import Game, Pick, PlayoffTeam, User
 
 logger = logging.getLogger(__name__)
@@ -233,7 +235,7 @@ def _build_pick_contexts(
             "spread":            game.spread,
             # derived
             "day_of_week":       (
-                game.kickoff_time.strftime("%A") if game.kickoff_time else None
+                to_eastern(game.kickoff_time).strftime("%A") if game.kickoff_time else None
             ),
             "cover_margin":      cover_margin,
             "team_made_playoffs": pick.picked_team in playoff_teams,

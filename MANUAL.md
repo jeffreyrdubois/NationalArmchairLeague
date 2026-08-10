@@ -176,19 +176,47 @@ From the admin panel, create weeks within the active season:
 #### Week Admin Page (`/admin/week/{id}`)
 From here you can:
 - **Sync from ESPN** — pulls the latest schedule and odds for the week
+- **Edit a kickoff time** — click a game's kickoff (the ✎ pencil) to open an inline
+  editor. Enter the date and time in **Eastern (ET)** and Save. This is handy when a
+  synced schedule has the wrong time. Editing the earliest game also updates the
+  week's automatic picks-lock and spread-lock times.
 - **Lock Spreads** — manually lock spreads early if needed
 - **Lock Picks** — manually lock picks early if needed
 - **Edit any player's picks** — useful if a player had a technical issue
+
+> **All game times are shown in US Eastern (ET).** Times are stored internally in
+> UTC and converted for display, so daylight-saving changes are handled automatically.
 
 ### User Management (`/admin/users`)
 - View all registered users with their email, role, and active status
 - **Change role** — promote players to Contributor or Admin using the dropdown
 - **Disable/Enable** — disabled users cannot log in (useful if someone leaves the league)
+- **Delete** — permanently removes a user and all of their picks. Use this to clean up
+  test accounts. This cannot be undone, so a confirmation is required. You cannot delete
+  your own account or the only remaining admin.
 
 > You cannot change your own role.
 
 ### Audit Log
-The bottom of the admin panel shows the last 20 actions taken by admins and contributors — who changed what, and when. All pick edits, spread overrides, score updates, and role changes are recorded here.
+The bottom of the admin panel shows the last 20 actions taken by admins and contributors — who changed what, and when. All pick edits, spread overrides, score updates, role changes, kickoff edits, user deletions, and submitted issues are recorded here.
+
+---
+
+## 9. Submitting an Issue
+
+Any logged-in user can report a bug or suggestion from the **Submit an Issue** page
+(`/feedback`), linked in the top navigation and the page footer. Enter a short title and
+a description and submit — the report is filed as an issue on the league's GitHub
+repository, with the submitter's name and email attached so admins can follow up.
+
+**Setup (admins):** issue reporting requires two environment variables:
+
+| Variable | Description |
+|---|---|
+| `GITHUB_ISSUE_TOKEN` | A GitHub token with read/write access to Issues on the repo |
+| `GITHUB_ISSUE_REPO` | The `owner/repo` to file issues on (defaults to the project repo) |
+
+Until these are set, the page still loads but tells users that reporting isn't available.
 
 ---
 
@@ -200,6 +228,7 @@ The bottom of the admin panel shows the last 20 actions taken by admins and cont
 | My Picks | `/picks` | All |
 | All Picks (after lock) | `/picks/week/{id}/all` | All |
 | Standings | `/standings` | All |
+| Submit an Issue | `/feedback` | All |
 | Spreads | `/admin/spreads` | Contributor+ |
 | Scores | `/admin/scores` | Contributor+ |
 | Admin Panel | `/admin/` | Admin |

@@ -14,6 +14,7 @@ from app.models import Season, Week, Game, Pick, User, Role, AuditLog, SpreadSou
 from app.auth import get_current_user, require_contributor, require_admin, hash_password
 from app.services import espn
 from app.services.scoring import update_game_results
+from app.utils import eastern_to_utc, to_eastern
 
 router = APIRouter(prefix="/admin")
 
@@ -609,6 +610,63 @@ async def sync_week(request: Request, week_id: int, db: Session = Depends(get_db
     return RedirectResponse(url=f"/admin/week/{week_id}?sync_ok={count}", status_code=303)
 
 
+@router.post("/week/{week_id}/game/{game_id}/kickoff")
+async def update_kickoff(
+    request: Request,
+    week_id: int,
+    game_id: int,
+    kickoff: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Admin edits a game's kickoff date/time. Input is Eastern; stored as UTC."""
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    game = db.query(Game).filter(Game.id == game_id, Game.week_id == week_id).first()
+    if not game:
+        raise HTTPException(status_code=404)
+
+    from urllib.parse import quote
+    try:
+        # datetime-local sends "YYYY-MM-DDTHH:MM" (or with seconds) in ET wall-clock
+        et_naive = datetime.fromisoformat(kickoff)
+    except (ValueError, TypeError):
+        return RedirectResponse(
+            url=f"/admin/week/{week_id}?sync_error={quote('Invalid kickoff date/time')}",
+            status_code=303,
+        )
+
+    old_utc = game.kickoff_time
+    game.kickoff_time = eastern_to_utc(et_naive.replace(tzinfo=None))
+
+    # Keep the week's derived lock times in sync with the earliest kickoff.
+    week = db.query(Week).filter(Week.id == week_id).first()
+    kickoffs = [
+        g.kickoff_time
+        for g in db.query(Game).filter(Game.week_id == week_id).all()
+        if g.kickoff_time is not None
+    ]
+    if week and kickoffs:
+        week.first_kickoff = min(kickoffs)
+        week.spread_lock_time = week.first_kickoff - timedelta(hours=24)
+
+    old_et = to_eastern(old_utc).strftime("%Y-%m-%d %H:%M ET") if old_utc else "TBD"
+    new_et = to_eastern(game.kickoff_time).strftime("%Y-%m-%d %H:%M ET")
+    db.add(AuditLog(
+        user_id=user.id,
+        action="edit_kickoff",
+        target_type="game",
+        target_id=game_id,
+        detail=f"{game.away_team} @ {game.home_team} kickoff changed from {old_et} to {new_et}",
+    ))
+    db.commit()
+    return RedirectResponse(
+        url=f"/admin/week/{week_id}?msg={quote('Kickoff updated for ' + game.away_team + ' @ ' + game.home_team)}",
+        status_code=303,
+    )
+
+
 @router.post("/week/{week_id}/lock-spreads")
 async def lock_spreads(request: Request, week_id: int, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
@@ -845,6 +903,67 @@ async def toggle_user(
     target.is_active = not target.is_active
     db.commit()
     return RedirectResponse(url="/admin/", status_code=303)
+
+
+@router.post("/users/{user_id}/delete")
+async def delete_user(
+    request: Request,
+    user_id: int,
+    db: Session = Depends(get_db),
+):
+    """Permanently delete a user and all of their dependent records."""
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    from urllib.parse import quote
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404)
+    if target.id == user.id:
+        return RedirectResponse(
+            url="/admin/?error=" + quote("You can't delete your own account"),
+            status_code=303,
+        )
+    # Never remove the last remaining admin.
+    if target.role == Role.admin:
+        admin_count = db.query(User).filter(User.role == Role.admin).count()
+        if admin_count <= 1:
+            return RedirectResponse(
+                url="/admin/?error=" + quote("Can't delete the only admin account"),
+                status_code=303,
+            )
+
+    target_name = target.full_name
+    target_email = target.email
+
+    # Remove dependent rows first (SQLite doesn't enforce FKs by default, but we
+    # clean up explicitly so no orphaned picks/subscriptions/transactions remain).
+    db.query(Pick).filter(Pick.user_id == user_id).delete(synchronize_session=False)
+    db.query(PushSubscription).filter(
+        PushSubscription.user_id == user_id
+    ).delete(synchronize_session=False)
+    db.query(Transaction).filter(
+        (Transaction.user_id == user_id) | (Transaction.logged_by_id == user_id)
+    ).delete(synchronize_session=False)
+    # Audit logs authored by the deleted user would dangle their FK; drop them.
+    db.query(AuditLog).filter(AuditLog.user_id == user_id).delete(synchronize_session=False)
+
+    db.delete(target)
+    db.flush()
+
+    db.add(AuditLog(
+        user_id=user.id,
+        action="delete_user",
+        target_type="user",
+        target_id=user_id,
+        detail=f"Permanently deleted {target_name} ({target_email})",
+    ))
+    db.commit()
+    return RedirectResponse(
+        url="/admin/?msg=" + quote(f"Deleted {target_name}"),
+        status_code=303,
+    )
 
 
 @router.post("/users/{user_id}/reset-password")

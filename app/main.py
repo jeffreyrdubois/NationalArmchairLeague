@@ -7,7 +7,7 @@ import logging
 
 from app.database import init_db
 from app.routers import auth, picks, dashboard, admin, awards
-from app.routers import push
+from app.routers import push, feedback
 from app.services.scheduler import setup_scheduler, scheduler
 from app.services.notifications import init_vapid_keys
 from app.templates_config import templates
@@ -39,6 +39,7 @@ app.include_router(dashboard.router)
 app.include_router(admin.router)
 app.include_router(awards.router)
 app.include_router(push.router)
+app.include_router(feedback.router)
 
 
 # Custom 401/403 → redirect to login

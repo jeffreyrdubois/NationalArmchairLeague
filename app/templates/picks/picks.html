@@ -9,7 +9,7 @@
       {% if week.is_picks_locked %}
         <span class="bg-red-100 text-red-700 px-2 py-1 rounded font-medium">Picks Locked</span>
       {% elif week.first_kickoff %}
-        Locks {{ week.first_kickoff.strftime('%a %b %-d %-I:%M%p ET') }}
+        Locks {{ (week.first_kickoff | eastern).strftime('%a %b %-d %-I:%M%p ET') }}
       {% endif %}
     </div>
   </div>
@@ -23,7 +23,7 @@
 
   {% if not week.is_spreads_locked and n_games > 0 %}
   <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-sm text-blue-700">
-    Spreads may still update until {{ week.spread_lock_time.strftime('%a %b %-d %-I:%M%p ET') if week.spread_lock_time else '24h before kickoff' }}.
+    Spreads may still update until {{ (week.spread_lock_time | eastern).strftime('%a %b %-d %-I:%M%p ET') if week.spread_lock_time else '24h before kickoff' }}.
     Check back closer to game time.
   </div>
   {% endif %}
@@ -53,7 +53,7 @@
     <div class="bg-white rounded-xl shadow mb-4 p-4">
       <!-- Kickoff -->
       <div class="text-xs text-gray-400 mb-3">
-        {{ game.kickoff_time.strftime('%A %b %-d \u2014 %-I:%M%p ET') if game.kickoff_time else 'Kickoff TBD' }}
+        {{ (game.kickoff_time | eastern).strftime('%A %b %-d \u2014 %-I:%M%p ET') if game.kickoff_time else 'Kickoff TBD' }}
         {% if game.spread is none %}
           <span class="ml-2 text-orange-500">Spread TBD</span>
         {% endif %}

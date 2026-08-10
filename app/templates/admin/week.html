@@ -55,7 +55,7 @@
     Picks: {% if week.is_picks_locked %}Locked{% else %}Open{% endif %}
   </div>
   {% if week.first_kickoff %}
-  <div class="text-sm text-gray-500">First kickoff: {{ week.first_kickoff.strftime('%a %b %-d %-I:%M%p UTC') }}</div>
+  <div class="text-sm text-gray-500">First kickoff: {{ (week.first_kickoff | eastern).strftime('%a %b %-d %-I:%M%p ET') }}</div>
   {% endif %}
 </div>
 
@@ -70,7 +70,7 @@
       <thead class="text-xs text-gray-500 uppercase">
         <tr>
           <th class="text-left pb-2">Matchup</th>
-          <th class="text-left pb-2">Kickoff</th>
+          <th class="text-left pb-2">Kickoff (ET)</th>
           <th class="text-center pb-2">Spread (home)</th>
           <th class="text-center pb-2">Source</th>
           <th class="text-center pb-2">Score</th>
@@ -82,7 +82,20 @@
         <tr class="border-t">
           <td class="py-2 font-medium">{{ game.away_team }} @ {{ game.home_team }}</td>
           <td class="py-2 text-gray-500 text-xs">
-            {{ game.kickoff_time.strftime('%a %-I:%M%p') if game.kickoff_time else 'TBD' }}
+            <details class="inline-block">
+              <summary class="cursor-pointer list-none select-none hover:text-gray-800">
+                {{ (game.kickoff_time | eastern).strftime('%a %b %-d %-I:%M%p') if game.kickoff_time else 'TBD' }}
+                <span class="text-blue-500 ml-1">✎</span>
+              </summary>
+              <form method="post" action="/admin/week/{{ week.id }}/game/{{ game.id }}/kickoff"
+                class="flex items-center gap-2 mt-2">
+                <input type="datetime-local" name="kickoff" required
+                  value="{{ (game.kickoff_time | eastern).strftime('%Y-%m-%dT%H:%M') if game.kickoff_time else '' }}"
+                  class="border rounded px-2 py-1 text-xs" />
+                <button class="bg-blue-600 text-white text-xs px-2 py-1 rounded hover:bg-blue-700">Save</button>
+              </form>
+              <div class="text-[10px] text-gray-400 mt-1">Enter Eastern (ET) time.</div>
+            </details>
           </td>
           <td class="py-2 text-center">
             {% if game.spread is not none %}{{ "%.1f"|format(game.spread) }}{% else %}&mdash;{% endif %}
