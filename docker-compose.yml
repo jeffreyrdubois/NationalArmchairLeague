@@ -17,6 +17,10 @@ services:
       # Set to "false" once everyone has registered to prevent new signups
       - REGISTRATION_OPEN
 
+      # "Submit an Issue" -> GitHub. Fill these in .env to enable issue reporting.
+      - GITHUB_ISSUE_TOKEN
+      - GITHUB_ISSUE_REPO
+
       # Database path (leave as-is when using the volume mount above)
       - DATABASE_URL=sqlite:////app/data/nal.db
 
