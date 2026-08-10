@@ -611,22 +611,38 @@ async def sync_week(request: Request, week_id: int, db: Session = Depends(get_db
 
 
 @router.post("/week/{week_id}/sync-odds")
-async def sync_week_odds(request: Request, week_id: int, db: Session = Depends(get_db)):
-    """Manually pull spreads from The Odds API for this week."""
+async def sync_week_odds(
+    request: Request,
+    week_id: int,
+    redirect_to: str = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Manually pull spreads from The Odds API for this week (contributor+)."""
     user = get_current_user(request, db)
-    if not user or user.role != Role.admin:
+    if not user or user.role not in (Role.contributor, Role.admin):
         raise HTTPException(status_code=403)
 
     week = db.query(Week).filter(Week.id == week_id).first()
     if not week:
         raise HTTPException(status_code=404)
 
-    from app.services.scheduler import sync_week_spreads
     from urllib.parse import quote
+
+    # Return to whichever page triggered the sync.
+    dest = f"/admin/spreads?week_id={week_id}" if redirect_to == "spreads" else f"/admin/week/{week_id}"
+    sep = "&" if "?" in dest else "?"
+
+    if week.is_spreads_locked and user.role != Role.admin:
+        return RedirectResponse(
+            url=f"{dest}{sep}error={quote('Spreads are locked for this week')}",
+            status_code=303,
+        )
+
+    from app.services.scheduler import sync_week_spreads
     count, error = await sync_week_spreads(week_id)
 
     if error:
-        return RedirectResponse(url=f"/admin/week/{week_id}?error={quote(error)}", status_code=303)
+        return RedirectResponse(url=f"{dest}{sep}error={quote(error)}", status_code=303)
 
     db.add(AuditLog(
         user_id=user.id,
@@ -637,7 +653,7 @@ async def sync_week_odds(request: Request, week_id: int, db: Session = Depends(g
     ))
     db.commit()
     msg = f"Updated odds for {count} game(s)." if count else "No odds updated (no matching lines, or all spreads are manual)."
-    return RedirectResponse(url=f"/admin/week/{week_id}?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(url=f"{dest}{sep}msg={quote(msg)}", status_code=303)
 
 
 @router.post("/week/{week_id}/game/{game_id}/kickoff")

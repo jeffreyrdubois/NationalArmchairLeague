@@ -39,6 +39,15 @@
   <span class="text-xs text-gray-400">(admins can still override)</span>
   {% endif %}
   {% endif %}
+  {% if not selected_week.is_spreads_locked or user.role == 'admin' %}
+  <form method="post" action="/admin/week/{{ selected_week.id }}/sync-odds" class="ml-auto">
+    <input type="hidden" name="redirect_to" value="spreads" />
+    <button class="bg-green-600 text-white text-sm px-3 py-1.5 rounded hover:bg-green-700"
+      title="Pull the latest DraftKings spreads from The Odds API (keeps manual overrides)">
+      Sync Odds
+    </button>
+  </form>
+  {% endif %}
 </div>
 
 <div class="bg-white rounded-xl shadow overflow-hidden">
