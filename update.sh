@@ -12,6 +12,11 @@ set -e
 
 cd "$(dirname "$0")"
 
+# External (host) port. Defaults to 8000; override with HOST_PORT in .env
+# (e.g. HOST_PORT=5950). The container always listens on 8000 internally.
+HOST_PORT="$(grep -E '^HOST_PORT=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]')"
+HOST_PORT="${HOST_PORT:-8000}"
+
 echo "==> Pulling latest code..."
 git pull --ff-only
 
@@ -33,7 +38,7 @@ else
   docker build -t nal .
   docker rm -f nal >/dev/null 2>&1 || true
   docker run -d --name nal --restart unless-stopped \
-    -p 8000:8000 \
+    -p "${HOST_PORT}:8000" \
     -v "$PWD/data:/app/data" \
     --env-file .env \
     nal
