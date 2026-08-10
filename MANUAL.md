@@ -220,6 +220,39 @@ Until these are set, the page still loads but tells users that reporting isn't a
 
 ---
 
+## 10. Configuration — Environment Variables
+
+App configuration lives in a `.env` file next to `docker-compose.yml` on the host.
+Copy `.env.example` to `.env` (`cp .env.example .env`) and fill it in. After changing
+any value, recreate the container so it's picked up — run `./update.sh` (or
+`docker compose up -d`); editing `.env` alone does **not** affect a running container.
+
+| Variable | Required? | What it does |
+|---|---|---|
+| `SECRET_KEY` | **Yes** | Signs the login-session tokens (JWT cookies). Use a long, random, and **stable** value — anyone who knows it can forge a login as any user. Changing it logs everyone out once (no data loss). |
+| `REGISTRATION_OPEN` | No (default `true`) | `true`/`false` switch for the public **/register** page. Leave `true` while players are signing up (the first to register becomes admin); set `false` afterward to stop new public signups. Admins can still add users manually from the Admin Panel regardless. |
+| `ODDS_API_KEY` | No | API key for [The Odds API](https://the-odds-api.com) used to **auto-fetch NFL point spreads**. If blank, auto-fetch is skipped and spreads are entered manually on `/admin/spreads`. |
+| `DATABASE_URL` | No (default set) | SQLite database location. Leave as `sqlite:////app/data/nal.db` when using the mounted `./data` volume so your data persists across updates. |
+| `GITHUB_ISSUE_TOKEN` | No | GitHub token with read/write access to Issues. Enables the **Submit an Issue** feature (Section 9). If blank, the feedback page shows a "not configured" notice. |
+| `GITHUB_ISSUE_REPO` | No (defaults to project repo) | The `owner/repo` that user-submitted issues are filed on. |
+
+> **Keep `.env` private.** It holds secrets (signing key, API tokens) and is excluded
+> from git via `.gitignore`, so it never gets committed or pulled — you maintain it
+> on the host. It won't appear with a plain `ls`; use `ls -a` to see it.
+
+### Updating the app (Unraid / Docker)
+
+From the repo directory on the host:
+
+```bash
+./update.sh
+```
+
+This pulls the latest code, rebuilds, restarts the container, and prunes old images.
+Your database (`./data`) and `.env` are left untouched.
+
+---
+
 ## Quick Reference
 
 | Page | URL | Who |
