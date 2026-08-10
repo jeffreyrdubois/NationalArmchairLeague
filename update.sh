@@ -5,28 +5,39 @@
 #
 #     ./update.sh
 #
+# Works with Docker Compose v2 ("docker compose"), the standalone
+# "docker-compose" binary, or plain docker if no Compose is installed.
 # Your SQLite database (./data) and your .env are left untouched.
 set -e
 
 cd "$(dirname "$0")"
 
-# Support both the Compose v2 plugin ("docker compose") and the older
-# standalone binary ("docker-compose", common on Unraid).
-if docker compose version >/dev/null 2>&1; then
-  DC="docker compose"
-elif command -v docker-compose >/dev/null 2>&1; then
-  DC="docker-compose"
-else
-  echo "Error: neither 'docker compose' nor 'docker-compose' is available." >&2
-  echo "Install the Compose plugin or the docker-compose binary and retry." >&2
-  exit 1
-fi
-
 echo "==> Pulling latest code..."
 git pull --ff-only
 
-echo "==> Rebuilding and restarting container (using: $DC)..."
-$DC up -d --build
+# Locate a Compose command, if any.
+COMPOSE=""
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE="docker compose"
+else
+  for p in docker-compose /usr/local/bin/docker-compose /usr/bin/docker-compose; do
+    if command -v "$p" >/dev/null 2>&1; then COMPOSE="$p"; break; fi
+  done
+fi
+
+if [ -n "$COMPOSE" ]; then
+  echo "==> Rebuilding and restarting (using: $COMPOSE)..."
+  $COMPOSE up -d --build
+else
+  echo "==> No Compose found — rebuilding with plain docker..."
+  docker build -t nal .
+  docker rm -f nal >/dev/null 2>&1 || true
+  docker run -d --name nal --restart unless-stopped \
+    -p 8000:8000 \
+    -v "$PWD/data:/app/data" \
+    --env-file .env \
+    nal
+fi
 
 echo "==> Cleaning up old images..."
 docker image prune -f >/dev/null 2>&1 || true
