@@ -58,7 +58,7 @@
                 <div class="text-xs text-green-600">Q{{ game.quarter }} {{ game.time_remaining }}</div>
               {% else %}
                 <div class="text-xs text-gray-500">
-                  {{ game.kickoff_time.strftime('%a %-I:%M%p') if game.kickoff_time else 'TBD' }}
+                  {{ (game.kickoff_time | eastern).strftime('%a %-I:%M%p ET') if game.kickoff_time else 'TBD' }}
                 </div>
                 <div class="text-xs font-medium text-gray-400">vs</div>
               {% endif %}

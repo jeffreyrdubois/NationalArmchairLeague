@@ -198,6 +198,16 @@
                 </div>
               </details>
 
+              {% if u.id != user.id %}
+              <!-- Delete (permanent) -->
+              <form method="post" action="/admin/users/{{ u.id }}/delete" class="inline"
+                onsubmit="return confirm('Permanently delete {{ u.first_name }} {{ u.last_name }}? This removes the user and all of their picks and cannot be undone.');">
+                <button class="text-xs px-2 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">
+                  Delete
+                </button>
+              </form>
+              {% endif %}
+
             </div>
           </td>
         </tr>

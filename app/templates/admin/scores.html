@@ -52,7 +52,7 @@
         <img src="{{ game.home_team_logo }}" class="w-8 h-8 object-contain" onerror="this.style.display='none'" />
       </div>
       <div class="text-sm text-gray-500 shrink-0">
-        {{ game.kickoff_time.strftime('%-m/%-d %I:%M%p ET') if game.kickoff_time else '' }}
+        {{ (game.kickoff_time | eastern).strftime('%-m/%-d %I:%M%p ET') if game.kickoff_time else '' }}
         {% if game.is_final %}<span class="ml-2 text-green-600 font-medium">Final</span>
         {% elif game.is_in_progress %}<span class="ml-2 text-green-600 live-pulse">Live</span>{% endif %}
       </div>

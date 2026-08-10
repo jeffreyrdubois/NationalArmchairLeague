@@ -65,7 +65,7 @@
           </div>
         </td>
         <td class="px-4 py-3 text-gray-500 text-xs">
-          {{ game.kickoff_time.strftime('%a %b %-d %-I:%M%p') if game.kickoff_time else 'TBD' }}
+          {{ (game.kickoff_time | eastern).strftime('%a %b %-d %-I:%M%p ET') if game.kickoff_time else 'TBD' }}
         </td>
         <td class="px-4 py-3 text-center font-mono font-bold">
           {% if game.spread is not none %}
