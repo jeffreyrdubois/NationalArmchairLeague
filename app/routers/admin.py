@@ -610,6 +610,36 @@ async def sync_week(request: Request, week_id: int, db: Session = Depends(get_db
     return RedirectResponse(url=f"/admin/week/{week_id}?sync_ok={count}", status_code=303)
 
 
+@router.post("/week/{week_id}/sync-odds")
+async def sync_week_odds(request: Request, week_id: int, db: Session = Depends(get_db)):
+    """Manually pull spreads from The Odds API for this week."""
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    week = db.query(Week).filter(Week.id == week_id).first()
+    if not week:
+        raise HTTPException(status_code=404)
+
+    from app.services.scheduler import sync_week_spreads
+    from urllib.parse import quote
+    count, error = await sync_week_spreads(week_id)
+
+    if error:
+        return RedirectResponse(url=f"/admin/week/{week_id}?error={quote(error)}", status_code=303)
+
+    db.add(AuditLog(
+        user_id=user.id,
+        action="sync_odds",
+        target_type="week",
+        target_id=week_id,
+        detail=f"Synced odds for {count} game(s) in week {week.week_number}",
+    ))
+    db.commit()
+    msg = f"Updated odds for {count} game(s)." if count else "No odds updated (no matching lines, or all spreads are manual)."
+    return RedirectResponse(url=f"/admin/week/{week_id}?msg={quote(msg)}", status_code=303)
+
+
 @router.post("/week/{week_id}/game/{game_id}/kickoff")
 async def update_kickoff(
     request: Request,
