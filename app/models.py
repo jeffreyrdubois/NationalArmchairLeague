@@ -19,6 +19,17 @@ class SpreadSource(str, enum.Enum):
     manual = "manual"
 
 
+class TeamPlayoffStatus(str, enum.Enum):
+    """A team's playoff standing for a season.
+
+    A team with no playoff_teams row is treated as "in the hunt" — neither
+    clinched nor eliminated. Only teams explicitly marked ``eliminated`` count
+    toward the Bottom Feeder award.
+    """
+    clinched = "clinched"
+    eliminated = "eliminated"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -186,12 +197,23 @@ class AppSetting(Base):
 
 
 class PlayoffTeam(Base):
-    """Teams that made the playoffs for a given season (used by Bottom Feeder award)."""
+    """A team's playoff standing for a season (used by the Bottom Feeder award).
+
+    Despite the historical table name, a row here records that a team has
+    *reached a definitive state* — either ``clinched`` a playoff spot or been
+    ``eliminated``. Teams with no row are still "in the hunt" and count for
+    neither. Only ``eliminated`` teams feed the Bottom Feeder award.
+    """
     __tablename__ = "playoff_teams"
 
     id = Column(Integer, primary_key=True, index=True)
     season_id = Column(Integer, ForeignKey("seasons.id"), nullable=False)
     team_abbreviation = Column(String(10), nullable=False)
+    status = Column(
+        SAEnum(TeamPlayoffStatus),
+        default=TeamPlayoffStatus.clinched,
+        nullable=False,
+    )
 
     __table_args__ = (UniqueConstraint("season_id", "team_abbreviation"),)
 

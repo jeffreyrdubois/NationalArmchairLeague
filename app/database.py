@@ -47,7 +47,16 @@ def _migrate():
         if "notif_week_results" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN notif_week_results BOOLEAN DEFAULT 1"))
 
-        # --- playoff_teams table (created by create_all; no ALTER needed) ---
-        # create_all handles new tables automatically; this comment anchors future migrations.
+        # --- playoff_teams table ---
+        # Existing rows predate the 3-state model and all represent clinched
+        # teams, so backfill the new status column with 'clinched'.
+        playoff_cols = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(playoff_teams)")).fetchall()
+        }
+        if playoff_cols and "status" not in playoff_cols:
+            conn.execute(text(
+                "ALTER TABLE playoff_teams ADD COLUMN status VARCHAR(20) "
+                "NOT NULL DEFAULT 'clinched'"
+            ))
 
         conn.commit()
