@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.utils import to_eastern
 
-from app.models import Game, Pick, PlayoffTeam, User
+from app.models import Game, Pick, PlayoffTeam, TeamPlayoffStatus, User
 
 logger = logging.getLogger(__name__)
 
@@ -140,14 +140,16 @@ AWARD_REGISTRY: list[AwardConfig] = [
         id="bottom_feeder",
         name="Bottom Feeder",
         description=(
-            "Most confidence points earned from correctly picking teams that did "
-            "not make the playoffs. Celebrates finding value where others don't look."
+            "Most confidence points earned from correctly picking teams that have "
+            "been eliminated from playoff contention. Teams still in the hunt don't "
+            "count, so this award stays empty until eliminations begin late in the "
+            "season. Celebrates finding value where others don't look."
         ),
         aggregation=AggregationType.SUM,
         aggregate_field="confidence_points",
         filters=[
-            FilterConfig("is_correct",         FilterOperator.EQ, True),
-            FilterConfig("team_made_playoffs",  FilterOperator.EQ, False),
+            FilterConfig("is_correct",       FilterOperator.EQ, True),
+            FilterConfig("team_eliminated",  FilterOperator.EQ, True),
         ],
     ),
     AwardConfig(
@@ -179,7 +181,7 @@ def get_award(award_id: str) -> AwardConfig | None:
 def _build_pick_contexts(
     db: Session,
     season_id: int,
-    playoff_teams: set[str],
+    eliminated_teams: set[str],
 ) -> list[dict]:
     """
     Return a flat list of pick-context dicts for every finalized pick in the
@@ -189,7 +191,9 @@ def _build_pick_contexts(
       day_of_week      – "Monday", "Tuesday", … from game.kickoff_time
       cover_margin     – how many points above the spread the covering team won
                          by (None if not a correct pick or data is missing)
-      team_made_playoffs – True if picked_team is in the playoff_teams set
+      team_eliminated  – True if picked_team has been eliminated from playoff
+                         contention. Teams still in the hunt or already clinched
+                         are False.
     """
     picks = (
         db.query(Pick)
@@ -238,7 +242,7 @@ def _build_pick_contexts(
                 to_eastern(game.kickoff_time).strftime("%A") if game.kickoff_time else None
             ),
             "cover_margin":      cover_margin,
-            "team_made_playoffs": pick.picked_team in playoff_teams,
+            "team_eliminated":   pick.picked_team in eliminated_teams,
         })
 
     return contexts
@@ -405,9 +409,11 @@ def compute_all_awards(
     if registry is None:
         registry = AWARD_REGISTRY
 
-    playoff_teams: set[str] = {
+    eliminated_teams: set[str] = {
         pt.team_abbreviation
-        for pt in db.query(PlayoffTeam).filter_by(season_id=season_id).all()
+        for pt in db.query(PlayoffTeam)
+        .filter_by(season_id=season_id, status=TeamPlayoffStatus.eliminated)
+        .all()
     }
 
     # All users who made at least one pick this season
@@ -419,7 +425,7 @@ def compute_all_awards(
         .all()
     ]
 
-    contexts = _build_pick_contexts(db, season_id, playoff_teams)
+    contexts = _build_pick_contexts(db, season_id, eliminated_teams)
 
     results: dict[str, dict[int, float]] = {}
     for cfg in registry:

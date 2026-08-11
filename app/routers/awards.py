@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_contributor
 from app.database import get_db
-from app.models import PlayoffTeam, Season, User
+from app.models import PlayoffTeam, Season, TeamPlayoffStatus, User
 from app.services.awards import AWARD_REGISTRY, compute_all_awards, rank_award
 from app.templates_config import templates
 
@@ -111,29 +111,40 @@ async def awards_page(
         ranking = rank_award(scores, users_by_id, cfg.win_condition)
         award_results.append({"config": cfg, "ranking": ranking})
 
-    playoff_team_set: set[str] = {
-        pt.team_abbreviation
+    # abbr → "clinched" | "eliminated"; teams absent here are "in the hunt".
+    team_status: dict[str, str] = {
+        pt.team_abbreviation: pt.status.value
         for pt in db.query(PlayoffTeam).filter_by(season_id=season.id).all()
     }
 
     return templates.TemplateResponse(
         "awards/awards.html",
         {
-            "request":          request,
-            "user":             user,
-            "season":           season,
-            "all_seasons":      all_seasons,
-            "award_results":    award_results,
-            "playoff_team_set": playoff_team_set,
-            "team_groups":      _group_teams(),
-            "divisions":        _DIVISIONS,
+            "request":       request,
+            "user":          user,
+            "season":        season,
+            "all_seasons":   all_seasons,
+            "award_results": award_results,
+            "team_status":   team_status,
+            "team_groups":   _group_teams(),
+            "divisions":     _DIVISIONS,
         },
     )
 
 
 # ---------------------------------------------------------------------------
-# Contributor/Admin: toggle a team's playoff status
+# Contributor/Admin: cycle a team's playoff status
 # ---------------------------------------------------------------------------
+
+# Each click advances a team through the three states:
+#   In the Hunt (no row) → Clinched → Eliminated → In the Hunt
+def _next_status(current: TeamPlayoffStatus | None) -> TeamPlayoffStatus | None:
+    if current is None:
+        return TeamPlayoffStatus.clinched
+    if current == TeamPlayoffStatus.clinched:
+        return TeamPlayoffStatus.eliminated
+    return None  # eliminated → back to in the hunt
+
 
 @router.post("/admin/awards/playoff-teams/toggle", response_class=HTMLResponse)
 async def toggle_playoff_team(
@@ -150,12 +161,19 @@ async def toggle_playoff_team(
         .filter_by(season_id=season_id, team_abbreviation=abbr)
         .first()
     )
-    if existing:
-        db.delete(existing)
-        clinched = False
+
+    new_status = _next_status(existing.status if existing else None)
+    if new_status is None:
+        if existing:
+            db.delete(existing)
+    elif existing:
+        existing.status = new_status
     else:
-        db.add(PlayoffTeam(season_id=season_id, team_abbreviation=abbr))
-        clinched = True
+        db.add(PlayoffTeam(
+            season_id=season_id,
+            team_abbreviation=abbr,
+            status=new_status,
+        ))
     db.commit()
 
     team = _TEAM_BY_ABBR.get(abbr, {"abbr": abbr, "name": abbr})
@@ -169,7 +187,7 @@ async def toggle_playoff_team(
                 "season_id": season_id,
                 "abbr":      abbr,
                 "name":      team["name"],
-                "clinched":  clinched,
+                "status":    new_status.value if new_status else "in_hunt",
             },
         )
 

@@ -90,10 +90,12 @@
 <div class="bg-white rounded-xl shadow p-5">
   <h2 class="font-bold text-lg mb-1">Playoff Status &mdash; {{ season.year }}</h2>
   <p class="text-xs text-gray-500 mb-5">
-    Used by the <strong>Bottom Feeder</strong> award. Click any team to toggle between
-    <span class="text-green-700 font-medium">Clinched</span> and
-    <span class="text-gray-500 font-medium">Eliminated</span>.
-    Changes apply instantly.
+    Used by the <strong>Bottom Feeder</strong> award. Click any team to cycle through
+    <span class="text-gray-500 font-medium">In the Hunt</span> &rarr;
+    <span class="text-green-700 font-medium">Clinched</span> &rarr;
+    <span class="text-red-600 font-medium">Eliminated</span>.
+    Only <span class="text-red-600 font-medium">Eliminated</span> teams count toward
+    Bottom Feeder. Changes apply instantly.
   </p>
 
   <!-- Two-column layout: AFC | NFC -->
@@ -110,7 +112,7 @@
               {% set abbr     = team.abbr %}
               {% set name     = team.name %}
               {% set season_id = season.id %}
-              {% set clinched = team.abbr in playoff_team_set %}
+              {% set status   = team_status.get(team.abbr, "in_hunt") %}
               {% include "awards/team_toggle.html" %}
             {% endfor %}
           </div>
