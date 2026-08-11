@@ -101,7 +101,7 @@ class Game(Base):
     away_team_logo = Column(String(500))
     kickoff_time = Column(DateTime)
 
-    # Spread: positive = home team favored by X; negative = away team favored by abs(X)
+    # Spread: negative = home team favored by abs(X); positive = away team favored by X
     # We store the spread from home team's perspective after rounding to nearest 0.5
     spread = Column(Float)                    # e.g. -3.5 means home is favored by 3.5
     spread_source = Column(SAEnum(SpreadSource), default=SpreadSource.api)
