@@ -40,8 +40,10 @@
                 <div class="font-semibold text-sm">{{ game.away_team_name or game.away_team }}</div>
                 {% if game.spread is not none %}
                 <div class="text-xs text-gray-500">
-                  {% if game.spread > 0 %}+{{ "%.1f"|format(game.spread) }}
-                  {% elif game.spread < 0 %}{{ "%.1f"|format(-game.spread) }} fav
+                  {# spread is from the home team's perspective (negative = home favored),
+                     so the away team is favored when spread > 0 #}
+                  {% if game.spread > 0 %}{{ "%.1f"|format(game.spread) }} fav
+                  {% elif game.spread < 0 %}+{{ "%.1f"|format(-game.spread) }}
                   {% else %}PK{% endif %}
                 </div>
                 {% endif %}
@@ -70,8 +72,9 @@
                 <div class="font-semibold text-sm">{{ game.home_team_name or game.home_team }}</div>
                 {% if game.spread is not none %}
                 <div class="text-xs text-gray-500">
-                  {% if game.spread < 0 %}{{ "%.1f"|format(game.spread) }} fav
-                  {% elif game.spread > 0 %}+{{ "%.1f"|format(-game.spread) }}
+                  {# spread is from the home team's perspective (negative = home favored) #}
+                  {% if game.spread < 0 %}{{ "%.1f"|format(-game.spread) }} fav
+                  {% elif game.spread > 0 %}+{{ "%.1f"|format(game.spread) }}
                   {% else %}PK{% endif %}
                 </div>
                 {% endif %}
