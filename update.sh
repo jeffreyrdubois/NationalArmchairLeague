@@ -31,6 +31,20 @@ else
 fi
 
 if [ -n "$COMPOSE" ]; then
+  # A container literally named "nal" that this Compose project does NOT manage
+  # (e.g. one first created by an older plain-docker run or the Unraid Docker
+  # template) blocks Compose from reusing the name and aborts the update with:
+  #   the container name "/nal" is already in use by container "..."
+  # Compose won't touch a container it didn't create, so detect that case — a
+  # "nal" container exists, but Compose doesn't consider it part of this
+  # project — and remove the stray one. The app is stateless (all data lives in
+  # ./data), so Compose simply recreates it below.
+  if [ -n "$(docker ps -aqf 'name=^/nal$' 2>/dev/null)" ] \
+     && [ -z "$($COMPOSE ps -q nal 2>/dev/null)" ]; then
+    echo "==> Removing stray 'nal' container not managed by Compose..."
+    docker rm -f nal >/dev/null 2>&1 || true
+  fi
+
   echo "==> Rebuilding and restarting (using: $COMPOSE)..."
   $COMPOSE up -d --build
 else
