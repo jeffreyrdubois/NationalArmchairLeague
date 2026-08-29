@@ -4,7 +4,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from datetime import datetime
 import enum
+import secrets
 from app.database import Base
 
 
@@ -51,6 +53,74 @@ class User(Base):
     @property
     def full_name(self):
         return f"{self.first_name} {self.last_name}"
+
+
+# Unambiguous alphabet — no O/0, I/1, etc. so codes survive being read aloud
+# or typed off a screenshot.
+_INVITE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def generate_invite_code() -> str:
+    """A 12-character code formatted in dash-separated groups (XXXX-XXXX-XXXX)."""
+    raw = "".join(secrets.choice(_INVITE_ALPHABET) for _ in range(12))
+    return f"{raw[0:4]}-{raw[4:8]}-{raw[8:12]}"
+
+
+def normalize_invite_code(code: str) -> str:
+    """Canonicalize user-entered codes: upper-cased, whitespace stripped."""
+    return "".join((code or "").split()).upper()
+
+
+class Invite(Base):
+    """A single-use registration invite.
+
+    Registration is invite-only: a code must be redeemed to create an account
+    (the sole exception is the very first account on a fresh install, which
+    bootstraps the admin).  An invite may optionally be locked to one email
+    address and/or given an expiry.
+    """
+    __tablename__ = "invites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(32), unique=True, nullable=False, index=True)
+    # When set, only this email address may redeem the invite.
+    email = Column(String(255))
+    note = Column(String(255))
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    expires_at = Column(DateTime)          # naive UTC; None = never expires
+    revoked_at = Column(DateTime)
+    used_by_id = Column(Integer, ForeignKey("users.id"))
+    used_at = Column(DateTime)
+
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    used_by = relationship("User", foreign_keys=[used_by_id])
+
+    @property
+    def is_used(self) -> bool:
+        return self.used_by_id is not None
+
+    @property
+    def is_revoked(self) -> bool:
+        return self.revoked_at is not None
+
+    @property
+    def is_expired(self) -> bool:
+        return self.expires_at is not None and self.expires_at <= datetime.utcnow()
+
+    @property
+    def is_valid(self) -> bool:
+        return not (self.is_used or self.is_revoked or self.is_expired)
+
+    @property
+    def status(self) -> str:
+        if self.is_used:
+            return "used"
+        if self.is_revoked:
+            return "revoked"
+        if self.is_expired:
+            return "expired"
+        return "active"
 
 
 class Season(Base):

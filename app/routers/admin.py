@@ -10,7 +10,11 @@ from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Season, Week, Game, Pick, User, Role, AuditLog, SpreadSource, PushSubscription, Transaction, AppSetting
+from app.models import (
+    Season, Week, Game, Pick, User, Role, AuditLog, SpreadSource,
+    PushSubscription, Transaction, AppSetting, Invite,
+    generate_invite_code,
+)
 from app.auth import get_current_user, require_contributor, require_admin, hash_password
 from app.services import espn
 from app.services.scoring import update_game_results
@@ -438,6 +442,8 @@ async def admin_home(request: Request, db: Session = Depends(get_db)):
             "seasons": seasons,
             "season_weeks": season_weeks,
             "users": users,
+            "invites": _load_invites(db),
+            "new_invite": request.query_params.get("new_invite"),
             "roles": Role,
             "sub_counts": sub_counts,
             "recent_logs": recent_logs,
@@ -1039,6 +1045,149 @@ async def reset_user_password(
     ))
     db.commit()
     return RedirectResponse(url="/admin/?msg=Password+reset+successfully", status_code=303)
+
+
+# ── Invites ──────────────────────────────────────────────────────────────────
+# Registration is invite-only, so these are the only way (short of adding a
+# player directly above) for someone new to get an account.
+
+def _load_invites(db: Session):
+    """Newest first, with still-usable invites pinned to the top."""
+    invites = (
+        db.query(Invite)
+        .order_by(Invite.created_at.desc(), Invite.id.desc())
+        .all()
+    )
+    return sorted(invites, key=lambda i: 0 if i.is_valid else 1)
+
+
+@router.post("/invites/create")
+async def create_invite(
+    request: Request,
+    email: str = Form(""),
+    note: str = Form(""),
+    expires_days: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    from urllib.parse import quote
+
+    email = (email or "").strip().lower()
+    if email and db.query(User).filter(User.email == email).first():
+        return RedirectResponse(
+            url="/admin/?error=" + quote(f"{email} already has an account"),
+            status_code=303,
+        )
+
+    expires_at = None
+    if expires_days:
+        try:
+            days = int(expires_days)
+        except ValueError:
+            days = 0
+        if days > 0:
+            expires_at = datetime.utcnow() + timedelta(days=days)
+
+    # Codes are random, but a collision would violate the unique index — retry
+    # a few times rather than 500 on astronomically bad luck.
+    for _ in range(10):
+        code = generate_invite_code()
+        if not db.query(Invite).filter(Invite.code == code).first():
+            break
+    else:
+        return RedirectResponse(
+            url="/admin/?error=" + quote("Could not generate an invite code, try again"),
+            status_code=303,
+        )
+
+    invite = Invite(
+        code=code,
+        email=email or None,
+        note=(note or "").strip() or None,
+        created_by_id=user.id,
+        expires_at=expires_at,
+    )
+    db.add(invite)
+    db.flush()
+    db.add(AuditLog(
+        user_id=user.id,
+        action="create_invite",
+        target_type="invite",
+        target_id=invite.id,
+        detail=f"Created invite {code}" + (f" for {email}" if email else ""),
+    ))
+    db.commit()
+    return RedirectResponse(url=f"/admin/?new_invite={code}#invites", status_code=303)
+
+
+@router.post("/invites/{invite_id}/revoke")
+async def revoke_invite(
+    request: Request,
+    invite_id: int,
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    from urllib.parse import quote
+    invite = db.query(Invite).filter(Invite.id == invite_id).first()
+    if not invite:
+        raise HTTPException(status_code=404)
+    if invite.is_used:
+        return RedirectResponse(
+            url="/admin/?error=" + quote("That invite has already been used"),
+            status_code=303,
+        )
+
+    invite.revoked_at = datetime.utcnow()
+    db.add(AuditLog(
+        user_id=user.id,
+        action="revoke_invite",
+        target_type="invite",
+        target_id=invite.id,
+        detail=f"Revoked invite {invite.code}",
+    ))
+    db.commit()
+    return RedirectResponse(
+        url="/admin/?msg=" + quote("Invite revoked") + "#invites",
+        status_code=303,
+    )
+
+
+@router.post("/invites/{invite_id}/delete")
+async def delete_invite(
+    request: Request,
+    invite_id: int,
+    db: Session = Depends(get_db),
+):
+    """Remove an invite row outright — housekeeping for the list."""
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    from urllib.parse import quote
+    invite = db.query(Invite).filter(Invite.id == invite_id).first()
+    if not invite:
+        raise HTTPException(status_code=404)
+
+    code = invite.code
+    db.delete(invite)
+    db.add(AuditLog(
+        user_id=user.id,
+        action="delete_invite",
+        target_type="invite",
+        target_id=invite_id,
+        detail=f"Deleted invite {code}",
+    ))
+    db.commit()
+    return RedirectResponse(
+        url="/admin/?msg=" + quote("Invite deleted") + "#invites",
+        status_code=303,
+    )
 
 
 def _get_fund_settings(db: Session) -> dict:
