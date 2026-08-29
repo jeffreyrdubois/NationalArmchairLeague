@@ -1,0 +1,131 @@
+name: Publish Docker Image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+# Merging three pull requests in a row would otherwise cost three publishes, and
+# the first two publish an image nobody will ever pull: `latest` only ever means
+# the newest commit on main. Cancelling superseded runs makes a burst of merges
+# cost one publish instead of one each.
+#
+# Grouped by ref so that a release tag build is never cancelled by a main merge
+# landing while it runs — those are different images, not successive drafts of
+# the same one.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/nationalarmchairleague
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Every image built from main would otherwise report its version as the
+      # literal string "main" — the same on every build, and so no help at all
+      # with the question the version line exists to answer: did the update
+      # actually apply. A release tag keeps its number; every other build gets
+      # the VERSION file plus the commit it was built from.
+      - id: build-info
+        name: Work out the version and build time
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(tr -d '[:space:]' < VERSION)+$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "built-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=sha,format=short
+
+      # Built for the host architecture first and actually started, so a broken
+      # image fails here rather than on the server. The multi-arch push below
+      # cannot be smoke-tested this way — buildx cannot load a manifest list
+      # into the local daemon.
+      - name: Build for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: nal:smoke
+          build-args: |
+            APP_VERSION=${{ steps.build-info.outputs.version }}
+            BUILD_DATE=${{ steps.build-info.outputs.built-at }}
+            GIT_COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the image
+        run: |
+          set -euo pipefail
+          # No environment at all, and a fresh empty volume: that is the install
+          # contract the Unraid template promises, so it is what gets asserted.
+          docker run -d --name smoke -p 8000:8000 nal:smoke
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health > /tmp/health.json; then
+              break
+            fi
+            sleep 2
+          done
+          cat /tmp/health.json
+          grep -q '"status":"ok"' /tmp/health.json
+          # The version the image reports is the only way anyone can tell which
+          # build is running, so a build that cannot report it is broken in the
+          # way that is hardest to notice later.
+          grep -qF "\"version\":\"${{ steps.build-info.outputs.version }}\"" /tmp/health.json
+          # The probe only ever runs inside the image; running it anywhere else
+          # would not prove anything.
+          docker exec smoke python /app/healthcheck.py
+          # A signing key must have been generated with no SECRET_KEY given —
+          # otherwise every install would sign cookies with the same source
+          # default, and forging a login would be trivial.
+          docker exec smoke test -s /app/data/secret.key
+          # The app must have dropped to the Unraid default user, and the
+          # database it created must be owned by that user rather than root.
+          test "$(docker exec smoke stat -c '%u:%g' /app/data/nal.db)" = "99:100"
+          # An anonymous request is redirected to the login page, not served.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/)" = "303"
+          docker logs smoke
+          docker rm -f smoke
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.build-info.outputs.version }}
+            BUILD_DATE=${{ steps.build-info.outputs.built-at }}
+            GIT_COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

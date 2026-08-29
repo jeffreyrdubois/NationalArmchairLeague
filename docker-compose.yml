@@ -1,6 +1,15 @@
+# For Compose Manager on Unraid, and for non-Unraid hosts. The Unraid template
+# in unraid/ is the first-class path there; this is the same container expressed
+# the other way.
+#
+# This pulls the image GitHub Actions publishes on every merge to main, so
+# updating is a pull and a restart rather than a rebuild — `./update.sh` does
+# both. To build from your working tree instead, comment out `image:` and
+# uncomment `build: .`.
 services:
   nal:
-    build: .
+    image: ghcr.io/jeffreyrdubois/nationalarmchairleague:latest
+    # build: .
     container_name: nal
     restart: unless-stopped
     ports:
@@ -8,9 +17,14 @@ services:
       # The container always listens on 8000 internally.
       - "${HOST_PORT:-8000}:8000"
     volumes:
-      - ./data:/app/data    # SQLite database persists here
+      # SQLite database and the session signing key persist here.
+      # Keep this on a cache pool, not a FUSE /mnt/user path — SQLite over
+      # Unraid's user share layer has a long history of locking problems.
+      - ./data:/app/data
     environment:
-      # Loaded from .env file — never hardcode secrets here
+      # Loaded from .env file — never hardcode secrets here.
+      # SECRET_KEY is optional: left unset, the container generates one into
+      # ./data/secret.key on first boot and reuses it across updates.
       - SECRET_KEY
       - ODDS_API_KEY
 
@@ -21,8 +35,14 @@ services:
       - GITHUB_ISSUE_TOKEN
       - GITHUB_ISSUE_REPO
 
-      # Database path (leave as-is when using the volume mount above)
-      - DATABASE_URL=sqlite:////app/data/nal.db
+      # Optional override. Unset, the image defaults to the volume path above.
+      - DATABASE_URL
+
+      # File ownership on the ./data volume. 99:100 (nobody:users) is the
+      # Unraid default and is almost always right.
+      - PUID=99
+      - PGID=100
+      - TZ=America/New_York
 
     # For SWAG reverse proxy integration:
     # Make sure nal is on the same Docker network as SWAG

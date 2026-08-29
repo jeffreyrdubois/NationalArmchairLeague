@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Catches syntax errors and bad imports before a merge triggers a publish
+      # — a fifteen-minute multi-arch build is an expensive place to find out
+      # a module does not import.
+      - name: Import the app
+        run: python -c "from app.main import app; print(app.title)"
+
+      # Every template is compiled, not just the ones the smoke test happens to
+      # render. A typo in a Jinja tag is otherwise a 500 on one page nobody
+      # visits until the season is underway.
+      #
+      # The app's own environment, not a bare one: Jinja resolves filter names
+      # at compile time, so a template using `| enumerate` or `| eastern` only
+      # compiles against the environment that registers them.
+      - name: Compile the templates
+        run: |
+          python - <<'PY'
+          from app.templates_config import templates
+
+          env = templates.env
+          names = env.list_templates(extensions=["html"])
+          for name in names:
+              env.get_template(name)
+          print(f"compiled {len(names)} templates")
+          PY
