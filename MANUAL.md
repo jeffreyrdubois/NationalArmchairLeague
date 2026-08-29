@@ -15,11 +15,24 @@
 ## 1. Getting Started
 
 ### Registering
-Navigate to `/register` and fill in your first name, last name, email address, and a password. Your email is what you'll use to log in.
+**The NAL is invite-only.** You cannot create an account without an invite code
+from an Admin — there is no open sign-up.
 
-> **Note:** The first person to register automatically becomes the Admin. Everyone after that starts as a Player.
+An Admin sends you an invite link that looks like
+`https://your-league-site/register?code=ABCD-EFGH-JKLM`. Open it and the code is
+filled in for you; then enter your first name, last name, email address, and a
+password. Your email is what you'll use to log in.
 
-Registration can be closed by the Admin once all players have signed up (via the `REGISTRATION_OPEN` environment setting).
+If you were given just the code rather than a link, go to `/register` and type it
+into the **Invite Code** box.
+
+Each code works exactly once, and an Admin may lock a code to a specific email
+address or give it an expiry date. If your link says the invite is invalid, used,
+expired, or revoked, ask an Admin for a fresh one.
+
+> **Note:** On a brand-new install with no accounts at all, the very first person
+> to register does so without a code and automatically becomes the Admin.
+> Everyone after that needs an invite and starts as a Player.
 
 ### Logging In
 Go to `/login`, enter your email and password. You'll be kept logged in for 30 days.
@@ -187,6 +200,27 @@ From here you can:
 > **All game times are shown in US Eastern (ET).** Times are stored internally in
 > UTC and converted for display, so daylight-saving changes are handled automatically.
 
+### Invites (`/admin/` → Invites)
+Registration is invite-only, so this panel is how new players get in.
+
+- **Create Invite** — generates a single-use code in `XXXX-XXXX-XXXX` form. Options:
+  - **Lock to Email** *(optional)* — only that email address can redeem the code.
+    Leave blank for a code anyone holding the link can use once.
+  - **Note** *(optional)* — a reminder to yourself of who it's for.
+  - **Expires** — 7, 14, or 30 days, or never. Defaults to 30 days.
+- **Copy link** — copies the full `/register?code=...` link to your clipboard. Send
+  that to your player by text or email.
+- **Revoke** — kills an unused code immediately, e.g. if a link was forwarded to
+  the wrong person.
+- **Delete** — removes the row from the list (housekeeping only).
+
+Each invite shows its status: **Active**, **Used** (with who redeemed it),
+**Expired**, or **Revoked**. Creating, revoking, and deleting invites are all
+recorded in the Audit Log.
+
+> Adding a player directly under **Users** below does not need an invite — that
+> path creates the account for them outright.
+
 ### User Management (`/admin/users`)
 - View all registered users with their email, role, and active status
 - **Change role** — promote players to Contributor or Admin using the dropdown
@@ -230,7 +264,7 @@ any value, recreate the container so it's picked up — run `./update.sh` (or
 | Variable | Required? | What it does |
 |---|---|---|
 | `SECRET_KEY` | **Yes** | Signs the login-session tokens (JWT cookies). Use a long, random, and **stable** value — anyone who knows it can forge a login as any user. Changing it logs everyone out once (no data loss). |
-| `REGISTRATION_OPEN` | No (default `true`) | `true`/`false` switch for the public **/register** page. Leave `true` while players are signing up (the first to register becomes admin); set `false` afterward to stop new public signups. Admins can still add users manually from the Admin Panel regardless. |
+| `REGISTRATION_OPEN` | No (default `true`) | Master on/off switch for the **/register** page. Registration is invite-only either way, so `true` is the normal setting — an invite code is still required. Set `false` only if you want to close `/register` outright, blocking even valid invite holders. Admins can still add users manually from the Admin Panel regardless. |
 | `ODDS_API_KEY` | No | API key for [The Odds API](https://the-odds-api.com) used to **auto-fetch NFL point spreads**. If blank, auto-fetch is skipped and spreads are entered manually on `/admin/spreads`. |
 | `DATABASE_URL` | No (default set) | SQLite database location. Leave as `sqlite:////app/data/nal.db` when using the mounted `./data` volume so your data persists across updates. |
 | `GITHUB_ISSUE_TOKEN` | No | GitHub token with read/write access to Issues. Enables the **Submit an Issue** feature (Section 9). If blank, the feedback page shows a "not configured" notice. |
