@@ -1,9 +1,10 @@
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
+import os
 
 from app.database import init_db
 from app.routers import auth, picks, dashboard, admin, awards
@@ -40,6 +41,32 @@ app.include_router(admin.router)
 app.include_router(awards.router)
 app.include_router(push.router)
 app.include_router(feedback.router)
+
+
+# Build metadata, baked in by the publish workflow (see .github/workflows/
+# docker-publish.yml). An image built by hand reports the "-dev" default, so a
+# local build can never be mistaken here for a published one.
+APP_VERSION = os.getenv("APP_VERSION", "0.0.0-dev")
+BUILD_DATE = os.getenv("BUILD_DATE", "")
+GIT_COMMIT = os.getenv("GIT_COMMIT", "")
+
+
+@app.get("/health", include_in_schema=False)
+async def health():
+    """Liveness probe and build identity.
+
+    Unauthenticated on purpose: Docker's HEALTHCHECK has no session, and after
+    an Unraid update the first question is "did the new image actually take?" —
+    which needs an answer you can get before logging in.
+    """
+    return JSONResponse(
+        {
+            "status": "ok",
+            "version": APP_VERSION,
+            "built_at": BUILD_DATE,
+            "commit": GIT_COMMIT,
+        }
+    )
 
 
 # Custom 401/403 → redirect to login

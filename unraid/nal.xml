@@ -1,0 +1,137 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>NationalArmchairLeague</Name>
+  <Repository>ghcr.io/jeffreyrdubois/nationalarmchairleague:latest</Repository>
+  <Registry>https://github.com/jeffreyrdubois/NationalArmchairLeague/pkgs/container/nationalarmchairleague</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/jeffreyrdubois/NationalArmchairLeague/issues</Support>
+  <Project>https://github.com/jeffreyrdubois/NationalArmchairLeague</Project>
+  <Overview>
+A family NFL pick 'em league: every week you rank the games you are most sure about, and confidence points are awarded against the spread.
+
+Picks lock at kickoff, standings update as scores come in, and season awards sort out who actually knew what they were talking about. Registration is invite-only — an admin issues codes from the Admin Panel.
+
+No required configuration. Click Apply, open the WebUI, register the first account, and it is running. The session signing key generates itself on first boot and is kept in the data folder, so updates never log anyone out.
+
+[b]Optional:[/b] add an Odds API key to auto-fetch point spreads each week instead of entering them by hand, and a GitHub token so the in-app "Submit an Issue" button files real issues.
+
+[b]Recommended:[/b] keep the appdata share on a cache pool (Prefer or Only) rather than the array. SQLite over Unraid's FUSE /mnt/user layer has a long history of locking problems. On 6.12+, enabling exclusive shares (Settings -&gt; Global Share Settings) or mapping /mnt/cache/appdata/nal directly is the safest setup.
+
+[b]Data:[/b] the league database and the signing key both live in the single /app/data folder, so the Appdata Backup plugin captures everything with no extra configuration.
+  </Overview>
+  <Category>Other:</Category>
+  <WebUI>http://[IP]:[PORT:8000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/jeffreyrdubois/NationalArmchairLeague/main/unraid/nal.xml</TemplateURL>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+
+  <Config
+    Name="WebUI Port"
+    Target="8000"
+    Default="5950"
+    Mode="tcp"
+    Description="Port the league is reachable on. Change only if 5950 is already taken. Point your reverse proxy or Cloudflare tunnel at this port."
+    Type="Port"
+    Display="always"
+    Required="true"
+    Mask="false">5950</Config>
+
+  <Config
+    Name="Data Path"
+    Target="/app/data"
+    Default="/mnt/user/appdata/nal"
+    Mode="rw"
+    Description="Everything the league owns: the SQLite database and the session signing key. Keep this on a cache pool rather than the array — see the Overview."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/nal</Config>
+
+  <Config
+    Name="Odds API Key"
+    Target="ODDS_API_KEY"
+    Default=""
+    Description="Optional. Key from the-odds-api.com, used to auto-fetch NFL point spreads each week. Leave blank and spreads are entered by hand on the Spreads page."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="true"/>
+
+  <Config
+    Name="Registration Open"
+    Target="REGISTRATION_OPEN"
+    Default="true"
+    Description="Master switch for the /register page. Registration is invite-only either way, so true is the normal setting — an invite code is still required. Set false to close the page outright, blocking even valid invite holders. Admins can always add users from the Admin Panel."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false">true</Config>
+
+  <Config
+    Name="GitHub Issue Token"
+    Target="GITHUB_ISSUE_TOKEN"
+    Default=""
+    Description="Optional. Fine-grained personal access token with read/write access to Issues on the repo below. Enables the in-app 'Submit an Issue' button. Left blank, the feedback page loads but reports that issue filing is unavailable."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="true"/>
+
+  <Config
+    Name="GitHub Issue Repo"
+    Target="GITHUB_ISSUE_REPO"
+    Default="jeffreyrdubois/nationalarmchairleague"
+    Description="The owner/repo that user-submitted issues are filed against."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">jeffreyrdubois/nationalarmchairleague</Config>
+
+  <Config
+    Name="Session Signing Key"
+    Target="SECRET_KEY"
+    Default=""
+    Description="Optional. Signs login cookies. Leave blank and one is generated on first boot and kept in the data folder — which is what you want unless you are restoring a backup and need existing logins to keep working. Changing it logs everyone out once; no data is lost."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="true"/>
+
+  <Config
+    Name="Timezone"
+    Target="TZ"
+    Default="America/New_York"
+    Description="Timezone. Kickoff and lock times are shown in Eastern regardless; this affects log timestamps and scheduled jobs."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">America/New_York</Config>
+
+  <Config
+    Name="PUID"
+    Target="PUID"
+    Default="99"
+    Description="User ID the app runs as. 99 (nobody) is the Unraid default and is almost always right."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">99</Config>
+
+  <Config
+    Name="PGID"
+    Target="PGID"
+    Default="100"
+    Description="Group ID the app runs as. 100 (users) is the Unraid default and is almost always right."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">100</Config>
+</Container>

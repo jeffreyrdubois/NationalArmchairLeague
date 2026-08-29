@@ -1,24 +1,34 @@
 #!/bin/bash
 #
-# Pull the latest code and rebuild/restart the NAL container.
+# Update NAL to the image GitHub Actions published from the latest main.
 # Run this from the repo directory on your Unraid host:
 #
 #     ./update.sh
 #
-# Works with Docker Compose v2 ("docker compose"), the standalone
-# "docker-compose" binary, or plain docker if no Compose is installed.
-# Your SQLite database (./data) and your .env are left untouched.
+# There is nothing to build: every merge to main publishes a multi-arch image
+# to ghcr.io, so an update is a pull and a restart. Works with Docker Compose v2
+# ("docker compose"), the standalone "docker-compose" binary, or plain docker if
+# no Compose is installed. Your SQLite database (./data) and your .env are left
+# untouched.
+#
+# On Unraid proper you do not need this at all — the container appears in the
+# Docker tab with an "update ready" flag, and Apply does the same thing.
 set -e
 
 cd "$(dirname "$0")"
+
+IMAGE="ghcr.io/jeffreyrdubois/nationalarmchairleague:latest"
 
 # External (host) port. Defaults to 8000; override with HOST_PORT in .env
 # (e.g. HOST_PORT=5950). The container always listens on 8000 internally.
 HOST_PORT="$(grep -E '^HOST_PORT=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]')"
 HOST_PORT="${HOST_PORT:-8000}"
 
-echo "==> Pulling latest code..."
-git pull --ff-only
+# The repo is still worth keeping current: docker-compose.yml, the Unraid
+# template, and this script itself all live in it. A dirty or diverged checkout
+# should not stop the container update, though — that is the part that matters.
+echo "==> Pulling latest repo files..."
+git pull --ff-only || echo "    (skipped — local changes or diverged branch; container update continues)"
 
 # Locate a Compose command, if any.
 COMPOSE=""
@@ -45,20 +55,32 @@ if [ -n "$COMPOSE" ]; then
     docker rm -f nal >/dev/null 2>&1 || true
   fi
 
-  echo "==> Rebuilding and restarting (using: $COMPOSE)..."
-  $COMPOSE up -d --build
+  echo "==> Pulling the latest image and restarting (using: $COMPOSE)..."
+  $COMPOSE pull
+  $COMPOSE up -d
 else
-  echo "==> No Compose found — rebuilding with plain docker..."
-  docker build -t nal .
+  echo "==> No Compose found — updating with plain docker..."
+  docker pull "$IMAGE"
   docker rm -f nal >/dev/null 2>&1 || true
   docker run -d --name nal --restart unless-stopped \
     -p "${HOST_PORT}:8000" \
     -v "$PWD/data:/app/data" \
     --env-file .env \
-    nal
+    "$IMAGE"
 fi
 
 echo "==> Cleaning up old images..."
 docker image prune -f >/dev/null 2>&1 || true
 
-echo "==> Done. NAL is up to date."
+# The version the container reports is the only way to tell whether the update
+# actually took, which is the whole question you ran this to answer.
+echo "==> Waiting for the app to come up..."
+for _ in $(seq 1 30); do
+  if health="$(curl -fsS "http://127.0.0.1:${HOST_PORT}/health" 2>/dev/null)"; then
+    echo "==> Now running: $health"
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "==> Container updated, but /health did not answer in 60s — check: docker logs nal"

@@ -263,10 +263,11 @@ any value, recreate the container so it's picked up — run `./update.sh` (or
 
 | Variable | Required? | What it does |
 |---|---|---|
-| `SECRET_KEY` | **Yes** | Signs the login-session tokens (JWT cookies). Use a long, random, and **stable** value — anyone who knows it can forge a login as any user. Changing it logs everyone out once (no data loss). |
+| `SECRET_KEY` | No (generated) | Signs the login-session tokens (JWT cookies). Left unset, the container generates a long random key into `data/secret.key` on first boot and reuses it on every update, so nobody is logged out by an update. Set it explicitly only when restoring a backup and you need existing logins to keep working. Changing it logs everyone out once (no data loss). |
 | `REGISTRATION_OPEN` | No (default `true`) | Master on/off switch for the **/register** page. Registration is invite-only either way, so `true` is the normal setting — an invite code is still required. Set `false` only if you want to close `/register` outright, blocking even valid invite holders. Admins can still add users manually from the Admin Panel regardless. |
 | `ODDS_API_KEY` | No | API key for [The Odds API](https://the-odds-api.com) used to **auto-fetch NFL point spreads**. If blank, auto-fetch is skipped and spreads are entered manually on `/admin/spreads`. |
-| `DATABASE_URL` | No (default set) | SQLite database location. Leave as `sqlite:////app/data/nal.db` when using the mounted `./data` volume so your data persists across updates. |
+| `DATABASE_URL` | No (default set) | SQLite database location. The image already defaults to `sqlite:////app/data/nal.db`, which is the mounted `./data` volume, so leave it alone unless you are doing something unusual. |
+| `PUID` / `PGID` | No (default `99`/`100`) | User and group the app runs as, and the owner it gives files in `./data`. `99:100` (nobody:users) is the Unraid default and is almost always right. |
 | `GITHUB_ISSUE_TOKEN` | No | GitHub token with read/write access to Issues. Enables the **Submit an Issue** feature (Section 9). If blank, the feedback page shows a "not configured" notice. |
 | `GITHUB_ISSUE_REPO` | No (defaults to project repo) | The `owner/repo` that user-submitted issues are filed on. |
 
@@ -276,14 +277,47 @@ any value, recreate the container so it's picked up — run `./update.sh` (or
 
 ### Updating the app (Unraid / Docker)
 
-From the repo directory on the host:
+Every merge to `main` publishes a ready-built image to the GitHub Container
+Registry (`ghcr.io/jeffreyrdubois/nationalarmchairleague:latest`), for both
+amd64 and arm64. Updating pulls that image — there is nothing to compile on the
+server, so an update takes seconds rather than minutes.
+
+**On Unraid**, the container shows up in the Docker tab with an **update ready**
+flag once a new image is published. Click **Apply** and you are done.
+
+To install it that way the first time, add this under
+*Docker → Add Container → Template repositories*:
+
+```
+https://raw.githubusercontent.com/jeffreyrdubois/NationalArmchairLeague/main/unraid/nal.xml
+```
+
+Nothing needs configuring for a first run: click Apply, open the WebUI, and
+register the first account. The signing key generates itself and lives in the
+data folder, so it survives every future update.
+
+**Anywhere else** (or from the repo directory on the host):
 
 ```bash
 ./update.sh
 ```
 
-This pulls the latest code, rebuilds, restarts the container, and prunes old images.
-Your database (`./data`) and `.env` are left untouched.
+This pulls the new image, restarts the container, prunes old images, and prints
+the version that came up. Your database (`./data`) and `.env` are left untouched.
+
+### Checking which version is running
+
+The version appears in the footer of every page, and at `/health`, which needs
+no login:
+
+```bash
+curl -s http://your-server:5950/health
+{"status":"ok","version":"1.0.0+a1b2c3d","built_at":"2026-08-29T14:02:11Z","commit":"a1b2c3d..."}
+```
+
+A version ending in `-dev` means the running image was built by hand rather than
+published by CI — useful for telling "the update did not apply" apart from "the
+update applied and did not fix it".
 
 ---
 
