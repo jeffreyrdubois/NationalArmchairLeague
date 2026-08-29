@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  # Builds and smoke-tests on a pull request too, without pushing. A change to
+  # the Dockerfile or the entrypoint is otherwise only exercised after it has
+  # already merged — and the first thing it would break is the update path
+  # itself, which is the worst thing to have to fix by hand on the server.
+  pull_request:
   workflow_dispatch:
 
 # Merging three pull requests in a row would otherwise cost three publishes, and
@@ -26,6 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Only the push needs this, and it is skipped on pull requests.
       packages: write
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +57,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -116,6 +123,7 @@ jobs:
           docker rm -f smoke
 
       - name: Build and push
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
