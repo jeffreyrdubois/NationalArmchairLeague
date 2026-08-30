@@ -285,16 +285,27 @@ server, so an update takes seconds rather than minutes.
 **On Unraid**, the container shows up in the Docker tab with an **update ready**
 flag once a new image is published. Click **Apply** and you are done.
 
-To install it that way the first time, add this under
-*Docker → Add Container → Template repositories*:
+To install it the first time, put the container template on the flash drive.
+There is no field in the Unraid UI to paste a template URL into — the
+`TemplateURL` line inside the XML is metadata for Community Applications, not
+something you enter anywhere. From a terminal on the server:
 
+```bash
+wget -O /boot/config/plugins/dockerMan/templates-user/my-NationalArmchairLeague.xml \
+  https://raw.githubusercontent.com/jeffreyrdubois/NationalArmchairLeague/main/unraid/nal.xml
 ```
-https://raw.githubusercontent.com/jeffreyrdubois/NationalArmchairLeague/main/unraid/nal.xml
-```
+
+The `my-` prefix is what makes Unraid treat it as a user template. Then go to
+*Docker → Add Container* and pick **NationalArmchairLeague** from the
+**Template** dropdown; every field arrives filled in.
 
 Nothing needs configuring for a first run: click Apply, open the WebUI, and
 register the first account. The signing key generates itself and lives in the
 data folder, so it survives every future update.
+
+The template is a starting point, not a live link — Unraid copies the values
+into its own container config when you Apply. Re-running the `wget` refreshes
+the template for a *new* container; it does not change one already created.
 
 **Anywhere else** (or from the repo directory on the host):
 

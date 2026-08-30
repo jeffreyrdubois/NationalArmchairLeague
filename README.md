@@ -11,14 +11,16 @@ Container Registry, so there is nothing to build:
 
     ghcr.io/jeffreyrdubois/nationalarmchairleague:latest
 
-**On Unraid**, add this template URL under Docker -> Add Container -> Template
-repositories, or point a template at it directly:
+**On Unraid**, drop the container template on the flash drive — there is no
+field in the UI to paste a template URL into:
 
-    https://raw.githubusercontent.com/jeffreyrdubois/NationalArmchairLeague/main/unraid/nal.xml
+    wget -O /boot/config/plugins/dockerMan/templates-user/my-NationalArmchairLeague.xml \
+      https://raw.githubusercontent.com/jeffreyrdubois/NationalArmchairLeague/main/unraid/nal.xml
 
-From then on Unraid flags the container as "update ready" whenever a new image
-is published, and **Apply** pulls it. Nothing else is needed — no configuration
-is required for a first run.
+Then *Docker -> Add Container*, and pick **NationalArmchairLeague** from the
+**Template** dropdown. From then on Unraid flags the container as "update ready"
+whenever a new image is published, and **Apply** pulls it. Nothing else is
+needed — no configuration is required for a first run.
 
 **With Compose**, on Unraid or anywhere else:
 
