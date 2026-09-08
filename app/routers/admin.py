@@ -820,27 +820,15 @@ async def save_user_picks(
         points = int(points_str)
         new_picks[game.id] = (points, picked_team)
 
+    from app.routers.picks import apply_picks
+
+    previous = apply_picks(db, user_id, week, new_picks)
+
     for game_id, (points, team) in new_picks.items():
-        existing = db.query(Pick).filter(
-            Pick.user_id == user_id, Pick.game_id == game_id
-        ).first()
-        if existing:
-            old = f"{existing.picked_team}/{existing.confidence_points}"
-            existing.confidence_points = points
-            existing.picked_team = team
-            existing.is_correct = None
-            existing.points_earned = None
-            detail = f"Changed from {old} to {team}/{points}"
+        if game_id in previous:
+            old_points, old_team = previous[game_id]
+            detail = f"Changed from {old_team}/{old_points} to {team}/{points}"
         else:
-            existing = Pick(
-                user_id=user_id,
-                game_id=game_id,
-                week_id=week_id,
-                season_id=week.season_id,
-                picked_team=team,
-                confidence_points=points,
-            )
-            db.add(existing)
             detail = f"Admin created pick: {team}/{points}"
 
         log = AuditLog(

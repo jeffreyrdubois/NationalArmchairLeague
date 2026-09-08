@@ -42,3 +42,10 @@ jobs:
               env.get_template(name)
           print(f"compiled {len(names)} templates")
           PY
+
+      # Editing picks after submitting them is the one flow with a database
+      # constraint standing behind it: confidence points are unique per user
+      # per week, so swapping two values has to be written carefully or the
+      # save fails and the player is stuck with the picks they first entered.
+      - name: Test editing submitted picks
+        run: python tests/test_pick_editing.py

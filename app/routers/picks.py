@@ -2,6 +2,7 @@ from app.templates_config import templates
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import Annotated
 from app.database import get_db
@@ -58,6 +59,79 @@ def build_pick_context(db: Session, week: Week, user: User, admin_user_id: int =
         "existing_picks": existing_picks,
         "used_points": used_points,
     }
+
+
+def apply_picks(db: Session, user_id: int, week: Week, new_picks: dict):
+    """Write ``{game_id: (confidence_points, picked_team)}`` for one user.
+
+    Confidence points are unique per user per week at the database level, so
+    rewriting picks in place breaks the moment two games trade point values:
+    the first UPDATE collides with the row still holding the value the other
+    game is moving to. Park every existing pick on a temporary out-of-range
+    value first, then write the real ones. Picks the caller left out (a
+    partial admin edit) keep the values they already had.
+
+    Returns ``{game_id: (old_points, old_team)}`` for the picks that already
+    existed, so callers can describe what changed.
+    """
+    existing = {
+        p.game_id: p
+        for p in db.query(Pick).filter(
+            Pick.user_id == user_id,
+            Pick.week_id == week.id,
+        ).all()
+    }
+    previous = {
+        game_id: (pick.confidence_points, pick.picked_team)
+        for game_id, pick in existing.items()
+    }
+
+    for offset, pick in enumerate(existing.values(), start=1):
+        pick.confidence_points = -offset
+    db.flush()
+
+    for game_id, (points, team) in new_picks.items():
+        pick = existing.get(game_id)
+        if pick:
+            pick.confidence_points = points
+            pick.picked_team = team
+            pick.is_correct = None
+            pick.points_earned = None
+        else:
+            db.add(
+                Pick(
+                    user_id=user_id,
+                    game_id=game_id,
+                    week_id=week.id,
+                    season_id=week.season_id,
+                    picked_team=team,
+                    confidence_points=points,
+                )
+            )
+
+    # Put back anything that wasn't part of this save.
+    assigned = {points for points, _ in new_picks.values()}
+    for game_id, pick in existing.items():
+        if game_id in new_picks:
+            continue
+        old_points = previous[game_id][0]
+        if old_points in assigned:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{old_points} points is already used on another game this week",
+            )
+        pick.confidence_points = old_points
+
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Each point value can only be used once per week",
+        )
+
+    return previous
 
 
 @router.get("/picks", response_class=HTMLResponse)
@@ -151,27 +225,7 @@ async def save_picks(
     if len(point_values) != len(set(point_values)):
         raise HTTPException(status_code=400, detail="Each point value can only be used once")
 
-    # Save picks
-    for game_id, (points, team) in new_picks.items():
-        existing = db.query(Pick).filter(
-            Pick.user_id == user.id, Pick.game_id == game_id
-        ).first()
-        if existing:
-            existing.confidence_points = points
-            existing.picked_team = team
-            existing.is_correct = None
-            existing.points_earned = None
-        else:
-            pick = Pick(
-                user_id=user.id,
-                game_id=game_id,
-                week_id=week_id,
-                season_id=week.season_id,
-                picked_team=team,
-                confidence_points=points,
-            )
-            db.add(pick)
-
+    apply_picks(db, user.id, week, new_picks)
     db.commit()
     return RedirectResponse(url=f"/picks?week_id={week_id}&saved=1", status_code=303)
 
