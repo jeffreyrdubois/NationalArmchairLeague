@@ -102,10 +102,10 @@
         {% endfor %}
       {% endif %}
 
-      {% if current_week and current_week.is_picks_locked %}
+      {% if current_week and current_games %}
       <a href="/picks/week/{{ current_week.id }}/all"
         class="block text-center mt-4 text-sm text-blue-600 hover:underline">
-        View all picks &rarr;
+        {% if current_week.is_picks_locked %}View all picks{% else %}See who&rsquo;s picked{% endif %} &rarr;
       </a>
       {% endif %}
     </div>

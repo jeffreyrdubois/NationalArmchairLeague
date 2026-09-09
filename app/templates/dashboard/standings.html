@@ -63,7 +63,8 @@
 <h2 class="font-semibold text-xl mb-4">Week by Week</h2>
 <div class="space-y-4">
   {% for wd in week_data %}
-  {% if wd.standings %}
+
+  {% if wd.revealed and wd.standings %}
   <div class="bg-white rounded-xl shadow p-5">
     <div class="flex items-center justify-between mb-3">
       <h3 class="font-semibold">{{ wd.week.label or ('Week ' + wd.week.week_number|string) }}</h3>
@@ -82,7 +83,38 @@
       {% endfor %}
     </div>
   </div>
+
+  {% elif not wd.revealed and wd.has_games %}
+  {# Picks are still hidden for this week, so show who is in rather than a
+     column of zeroes. Names only — no picks until the first kickoff. #}
+  <div class="bg-white rounded-xl shadow p-5">
+    <div class="flex items-center justify-between mb-1">
+      <h3 class="font-semibold">{{ wd.week.label or ('Week ' + wd.week.week_number|string) }}</h3>
+      <a href="/picks/week/{{ wd.week.id }}/all" class="text-xs text-blue-600 hover:underline">
+        Who&rsquo;s picked &rarr;
+      </a>
+    </div>
+    <p class="text-xs text-gray-400 mb-3">
+      Picks stay hidden until the first kickoff{% if wd.week.first_kickoff %},
+      {{ (wd.week.first_kickoff | eastern).strftime('%a %b %-d %-I:%M%p ET') }}{% endif %}
+      &mdash; {{ wd.submitted_count }} of {{ wd.submission|length }} players are in.
+    </p>
+    <div class="flex gap-2 flex-wrap">
+      {% for row in wd.submission %}
+      <span class="text-xs px-2 py-1 rounded font-medium
+        {% if row.is_complete %}bg-green-100 text-green-700
+        {% elif row.has_started %}bg-yellow-100 text-yellow-800
+        {% else %}bg-red-100 text-red-700{% endif %}">
+        {{ row.user.first_name }}
+        {% if row.is_complete %}&#10003;
+        {% elif row.has_started %}{{ row.picks_made }}/{{ row.n_games }}
+        {% else %}&#10007;{% endif %}
+      </span>
+      {% endfor %}
+    </div>
+  </div>
   {% endif %}
+
   {% endfor %}
 </div>
 

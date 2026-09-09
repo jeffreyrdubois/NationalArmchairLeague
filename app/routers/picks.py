@@ -8,6 +8,7 @@ from typing import Annotated
 from app.database import get_db
 from app.models import Season, Week, Game, Pick, User, AuditLog
 from app.auth import get_current_user, require_user
+from app.services.visibility import get_submission_status, picks_are_revealed
 
 router = APIRouter()
 
@@ -236,7 +237,13 @@ async def all_picks_for_week(
     week_id: int,
     db: Session = Depends(get_db),
 ):
-    """View all users' picks for a week — only visible after picks are locked."""
+    """Everyone's picks for a week — revealed only once the week is locked.
+
+    Before the lock this is a submission board instead: who has their picks in
+    and who still owes them, with no pick content for anyone (an admin
+    included). The picks themselves are not even loaded, so there is nothing
+    for the page to leak.
+    """
     user = get_current_user(request, db)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
@@ -245,9 +252,7 @@ async def all_picks_for_week(
     if not week:
         raise HTTPException(status_code=404, detail="Week not found")
 
-    from app.models import Role
-    if not week.is_picks_locked and user.role != Role.admin:
-        raise HTTPException(status_code=403, detail="Picks are not yet revealed")
+    revealed = picks_are_revealed(week)
 
     games = (
         db.query(Game)
@@ -256,15 +261,18 @@ async def all_picks_for_week(
         .all()
     )
     users = db.query(User).filter(User.is_active == True).all()
-    all_picks = db.query(Pick).filter(Pick.week_id == week_id).all()
 
-    # Build matrix: {user_id: {game_id: pick}}
     pick_matrix = {}
-    for pick in all_picks:
-        pick_matrix.setdefault(pick.user_id, {})[pick.game_id] = pick
+    standings = []
+    if revealed:
+        # Build matrix: {user_id: {game_id: pick}}
+        for pick in db.query(Pick).filter(Pick.week_id == week_id).all():
+            pick_matrix.setdefault(pick.user_id, {})[pick.game_id] = pick
 
-    from app.services.scoring import get_week_standings
-    standings = get_week_standings(db, week_id)
+        from app.services.scoring import get_week_standings
+        standings = get_week_standings(db, week_id)
+
+    submission_status = get_submission_status(db, week)
 
     return templates.TemplateResponse(
         "picks/all_picks.html",
@@ -274,7 +282,10 @@ async def all_picks_for_week(
             "week": week,
             "games": games,
             "users": users,
+            "revealed": revealed,
             "pick_matrix": pick_matrix,
             "standings": standings,
+            "submission_status": submission_status,
+            "submitted_count": sum(1 for r in submission_status if r["is_complete"]),
         },
     )

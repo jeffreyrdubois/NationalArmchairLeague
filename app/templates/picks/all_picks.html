@@ -1,9 +1,57 @@
 {% extends "base.html" %}
-{% block title %}All Picks &mdash; {{ week.label or ('Week ' + week.week_number|string) }}{% endblock %}
+{% block title %}{% if revealed %}All Picks{% else %}Pick Status{% endif %} &mdash; {{ week.label or ('Week ' + week.week_number|string) }}{% endblock %}
 {% block content %}
 
-<h1 class="text-2xl font-bold mb-2">{{ week.label or ('Week ' + week.week_number|string) }} &mdash; All Picks</h1>
+<h1 class="text-2xl font-bold mb-2">
+  {{ week.label or ('Week ' + week.week_number|string) }} &mdash;
+  {% if revealed %}All Picks{% else %}Pick Status{% endif %}
+</h1>
+{% if revealed %}
 <p class="text-sm text-gray-500 mb-6">Picks revealed after the first game kicks off.</p>
+{% else %}
+<p class="text-sm text-gray-500 mb-6">
+  Nobody&rsquo;s picks are visible until the first game kicks off{% if week.first_kickoff %}
+  &mdash; {{ (week.first_kickoff | eastern).strftime('%a %b %-d %-I:%M%p ET') }}{% endif %}.
+  Until then you can see who still owes theirs.
+</p>
+{% endif %}
+
+{% if not revealed %}
+<!-- Who has picked (no pick content until the lock) -->
+<div class="bg-white rounded-xl shadow p-5">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="font-semibold text-lg">Who&rsquo;s Picked</h2>
+    <span class="text-sm text-gray-500">
+      {{ submitted_count }} of {{ submission_status|length }} in
+    </span>
+  </div>
+  <ul class="divide-y">
+    {% for row in submission_status %}
+    <li class="flex items-center justify-between py-2.5">
+      <a href="/profile/{{ row.user.id }}" class="text-sm font-medium hover:underline">
+        {{ row.user.first_name }} {{ row.user.last_name }}
+        {% if row.user.id == user.id %}<span class="text-xs text-gray-400">(you)</span>{% endif %}
+      </a>
+      {% if row.is_complete %}
+      <span class="text-xs font-semibold bg-green-100 text-green-700 px-2 py-1 rounded">Submitted &#10003;</span>
+      {% elif row.has_started %}
+      <span class="text-xs font-semibold bg-yellow-100 text-yellow-800 px-2 py-1 rounded">
+        {{ row.picks_made }} of {{ row.n_games }}
+      </span>
+      {% else %}
+      <span class="text-xs font-semibold bg-red-100 text-red-700 px-2 py-1 rounded">Not submitted</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% if submitted_count < submission_status|length %}
+  <p class="text-xs text-gray-400 mt-4">
+    Nudge anyone still outstanding &mdash; picks lock for everyone at the first kickoff.
+  </p>
+  {% endif %}
+</div>
+
+{% else %}
 
 <!-- Week standings -->
 <div class="bg-white rounded-xl shadow p-5 mb-6">
@@ -123,6 +171,7 @@
 
 {% if games|selectattr("is_in_progress")|list %}
 <script>setTimeout(() => window.location.reload(), 60000);</script>
+{% endif %}
 {% endif %}
 
 {% endblock %}

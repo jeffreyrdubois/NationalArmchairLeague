@@ -49,3 +49,10 @@ jobs:
       # save fails and the player is stuck with the picks they first entered.
       - name: Test editing submitted picks
         run: python tests/test_pick_editing.py
+
+      # Pick secrecy is the rule the whole pool rests on: anyone who can read
+      # another player's picks before the lock can just copy the field. It is
+      # also the easiest thing to break by accident from a template, so these
+      # drive the real pages and read the rendered HTML.
+      - name: Test pick visibility before the lock
+        run: python tests/test_pick_visibility.py

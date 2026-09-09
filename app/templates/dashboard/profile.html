@@ -27,11 +27,6 @@
 </div>
 
 <!-- Summary stats -->
-{% set all_picks = picks_by_week.values()|sum(start=[]) %}
-{% set correct = all_picks|selectattr("is_correct", "equalto", true)|list|length %}
-{% set wrong = all_picks|selectattr("is_correct", "equalto", false)|list|length %}
-{% set total_pts = all_picks|selectattr("points_earned")|map(attribute="points_earned")|sum %}
-
 <div class="grid grid-cols-3 gap-4 mb-8">
   <div class="bg-white rounded-xl shadow p-4 text-center">
     <div class="text-3xl font-bold text-yellow-500">{{ total_pts|int }}</div>
@@ -51,21 +46,15 @@
 
 <!-- Picks by week -->
 <div class="space-y-4">
-  {% for week, picks in picks_by_week.items() %}
-  {% if picks %}
+  {% for wd in weeks_data %}
   <div class="bg-white rounded-xl shadow p-5">
     <div class="flex items-center justify-between mb-3">
-      <h3 class="font-semibold">{{ week.label or ('Week ' + week.week_number|string) }}</h3>
-      <div class="text-sm font-bold">
-        {% set wk_pts = picks|selectattr("points_earned")|map(attribute="points_earned")|sum %}
-        {{ wk_pts|int }} pts
-      </div>
+      <h3 class="font-semibold">{{ wd.week.label or ('Week ' + wd.week.week_number|string) }}</h3>
+      <div class="text-sm font-bold">{{ wd.week_points|int }} pts</div>
     </div>
-    {% if not week.is_picks_locked and profile_user.id != user.id and user.role != 'admin' %}
-    <p class="text-sm text-gray-400 italic">Picks hidden until locked</p>
-    {% else %}
+    {% if wd.revealed %}
     <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
-      {% for pick in picks|sort(attribute="confidence_points", reverse=True) %}
+      {% for pick in wd.picks|sort(attribute="confidence_points", reverse=True) %}
       <div class="text-xs border rounded px-2 py-1 flex justify-between items-center
         {% if pick.is_correct == true %}pick-correct
         {% elif pick.is_correct == false %}pick-wrong
@@ -79,9 +68,15 @@
       </div>
       {% endfor %}
     </div>
+    {% else %}
+    <div class="flex items-center gap-2">
+      <span class="text-xs font-semibold bg-green-100 text-green-700 px-2 py-1 rounded">
+        {{ wd.picks_made }} pick{{ '' if wd.picks_made == 1 else 's' }} submitted
+      </span>
+      <span class="text-sm text-gray-400 italic">Hidden until the first kickoff</span>
+    </div>
     {% endif %}
   </div>
-  {% endif %}
   {% endfor %}
 </div>
 

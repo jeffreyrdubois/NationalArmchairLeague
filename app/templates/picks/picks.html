@@ -19,6 +19,11 @@
     Picks are locked for this week. You can view everyone's picks below.
     <a href="/picks/week/{{ week.id }}/all" class="font-medium underline ml-1">View all picks &rarr;</a>
   </div>
+  {% elif n_games > 0 %}
+  <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6 text-sm text-gray-600">
+    Nobody sees anyone else's picks until the first kickoff &mdash; but you can check who still owes theirs.
+    <a href="/picks/week/{{ week.id }}/all" class="font-medium underline ml-1">See who&rsquo;s picked &rarr;</a>
+  </div>
   {% endif %}
 
   {% if not week.is_spreads_locked and n_games > 0 %}
