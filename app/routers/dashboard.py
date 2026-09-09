@@ -7,6 +7,11 @@ from app.database import get_db
 from app.models import Season, Week, Game, Pick, User, PushSubscription, Transaction, AppSetting
 from app.auth import get_current_user, verify_password, hash_password
 from app.services.scoring import get_week_standings, get_season_standings
+from app.services.visibility import (
+    can_see_picks,
+    get_submission_status,
+    picks_are_revealed,
+)
 
 router = APIRouter()
 
@@ -133,13 +138,20 @@ async def standings_page(
         .all()
     )
 
-    # Per-week scores for each user (for the chart)
+    # Per-week breakdown. A week whose picks are still hidden has no scores
+    # worth showing — every total is zero — so it carries submission status
+    # instead: who has their picks in for the week, and who has not.
     week_data = []
     for week in weeks:
-        ws = get_week_standings(db, week.id)
+        revealed = picks_are_revealed(week)
+        submission = [] if revealed else get_submission_status(db, week)
         week_data.append({
             "week": week,
-            "standings": ws,
+            "revealed": revealed,
+            "standings": get_week_standings(db, week.id) if revealed else [],
+            "submission": submission,
+            "submitted_count": sum(1 for r in submission if r["is_complete"]),
+            "has_games": bool(submission and submission[0]["n_games"]),
         })
 
     return templates.TemplateResponse(
@@ -179,7 +191,14 @@ async def user_profile(
 
     all_seasons = db.query(Season).order_by(Season.year.desc()).all()
 
-    picks_by_week = {}
+    # One entry per week the profile's owner has picks in. Whether the picks
+    # themselves travel to the template is decided here, not in the markup:
+    # until a week locks, only the owner sees their own picks. Everyone else —
+    # admins included — gets the count and nothing more.
+    weeks_data = []
+    total_pts = 0.0
+    correct = 0
+    wrong = 0
     if season:
         weeks = (
             db.query(Week)
@@ -193,7 +212,22 @@ async def user_profile(
                 .filter(Pick.user_id == profile_user.id, Pick.week_id == week.id)
                 .all()
             )
-            picks_by_week[week] = picks
+            if not picks:
+                continue
+
+            week_pts = sum(p.points_earned or 0 for p in picks)
+            total_pts += week_pts
+            correct += sum(1 for p in picks if p.is_correct is True)
+            wrong += sum(1 for p in picks if p.is_correct is False)
+
+            revealed = can_see_picks(week, user, profile_user.id)
+            weeks_data.append({
+                "week": week,
+                "picks": picks if revealed else [],
+                "revealed": revealed,
+                "picks_made": len(picks),
+                "week_points": week_pts,
+            })
 
     return templates.TemplateResponse(
         "dashboard/profile.html",
@@ -203,7 +237,10 @@ async def user_profile(
             "profile_user": profile_user,
             "season": season,
             "all_seasons": all_seasons,
-            "picks_by_week": picks_by_week,
+            "weeks_data": weeks_data,
+            "total_pts": total_pts,
+            "correct": correct,
+            "wrong": wrong,
         },
     )
 

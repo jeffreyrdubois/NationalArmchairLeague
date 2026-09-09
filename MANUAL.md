@@ -94,7 +94,22 @@ Every week you assign a unique point value to each game. The number of available
 2. Assign a confidence point value from the dropdown
 3. Click **Save My Picks**
 
-You can edit your picks any time before the lock. After the lock, all players' picks become visible to everyone.
+You can edit your picks any time before the lock.
+
+### Who Can See Your Picks
+Nobody — not other players, and not the commissioner — can see your picks
+before the week locks. That includes the standings page, player profiles and
+the all-picks page. Everyone's picks become visible to everyone at the lock,
+and not a moment earlier.
+
+What everyone *can* see beforehand is **who has submitted**. The standings page
+and `/picks/week/{id}/all` both show a roster for the current week marking each
+player as submitted, partway, or not started, so you can chase whoever still
+owes their picks. It is names and counts only — never a team or a point value.
+
+The one exception is the admin panel's **Edit User Picks** screen, which an
+admin uses to enter picks on behalf of a player who sent them in by text. Every
+such edit is recorded in the admin audit log.
 
 ### Important Timing Notes
 - **Spreads** may still update up until 24 hours before the first kickoff
@@ -327,7 +342,7 @@ update applied and did not fix it".
 |---|---|---|
 | Dashboard | `/` | All |
 | My Picks | `/picks` | All |
-| All Picks (after lock) | `/picks/week/{id}/all` | All |
+| All Picks (after lock) / Pick Status (before) | `/picks/week/{id}/all` | All |
 | Standings | `/standings` | All |
 | Submit an Issue | `/feedback` | All |
 | Spreads | `/admin/spreads` | Contributor+ |
