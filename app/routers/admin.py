@@ -11,13 +11,13 @@ from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import (
-    Season, Week, Game, Pick, User, Role, AuditLog, SpreadSource,
+    Season, Week, Game, Pick, User, Role, AuditLog, ScoreSource, SpreadSource,
     PushSubscription, Transaction, AppSetting, Invite,
     generate_invite_code,
 )
 from app.auth import get_current_user, require_contributor, require_admin, hash_password
 from app.services import espn, github_issues
-from app.services.scoring import update_game_results
+from app.services.scoring import unscore_game, update_game_results
 from app.utils import eastern_to_utc, to_eastern
 
 router = APIRouter(prefix="/admin")
@@ -263,24 +263,31 @@ async def update_spread(
     return RedirectResponse(url=dest, status_code=303)
 
 
-def _unscore_game(db: Session, game: Game) -> None:
-    """Reset a game and all its picks back to an unscored/pending state."""
-    game.home_score = None
-    game.away_score = None
-    game.is_final = False
-    game.is_in_progress = False
-    game.home_covered = None
-    for pick in db.query(Pick).filter(Pick.game_id == game.id).all():
-        pick.is_correct = None
-        pick.points_earned = None
+def _parse_score(raw: str | None) -> int | None:
+    """Read a score box. An empty box means "no score", not a 422.
+
+    The form posts empty strings for blank number inputs, and declaring these
+    as ``int | None`` made FastAPI reject the whole save — so half-filling a
+    game (or clearing one box) looked to a contributor like the app simply
+    refused to save.
+    """
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if raw == "":
+        return None
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        return None
 
 
 @router.post("/scores/update")
 async def update_score(
     request: Request,
     game_id: int = Form(...),
-    home_score: int | None = Form(None),
-    away_score: int | None = Form(None),
+    home_score: str | None = Form(None),
+    away_score: str | None = Form(None),
     is_final: bool = Form(False),
     redirect_week_id: int = Form(None),
     db: Session = Depends(get_db),
@@ -293,6 +300,9 @@ async def update_score(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
+    home_score = _parse_score(home_score)
+    away_score = _parse_score(away_score)
+
     old_final = game.is_final
     scores_cleared = home_score is None or away_score is None
 
@@ -302,11 +312,19 @@ async def update_score(
 
     # If game was final and is now being un-finaled, reset picks to pending
     if old_final and (not is_final or scores_cleared):
-        _unscore_game(db, game)
+        unscore_game(db, game)
 
     game.home_score = home_score
     game.away_score = away_score
     game.is_final = is_final
+    # A final entered by hand outranks the feed, which must not overwrite it on
+    # its next pass — that is what made saved finals disappear minutes later.
+    # A score typed in before the game ends is provisional, so the live feed is
+    # still welcome to refine it.
+    game.score_source = ScoreSource.manual if is_final else ScoreSource.api
+    game.score_updated_at = datetime.utcnow()
+    if is_final:
+        game.is_in_progress = False
 
     db.add(AuditLog(
         user_id=user.id,
@@ -316,7 +334,9 @@ async def update_score(
         detail=f"Score set to {away_score}@{home_score}, final={is_final}",
     ))
 
-    if is_final and not old_final:
+    if is_final:
+        # Also covers correcting an already-final score: coverage and every
+        # pick on the game are recomputed from the score now on the row.
         update_game_results(db, game)
     else:
         db.commit()
@@ -340,7 +360,10 @@ async def clear_score(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    _unscore_game(db, game)
+    unscore_game(db, game)
+    # Cleared by hand means "I have nothing" — let the feed fill it in again.
+    game.score_source = ScoreSource.api
+    game.score_updated_at = datetime.utcnow()
 
     db.add(AuditLog(
         user_id=user.id,
@@ -374,10 +397,18 @@ async def scores_page(request: Request, db: Session = Depends(get_db)):
             .all()
         )
 
-        # Honor ?week_id= param; otherwise default to first incomplete week
+        # Honor ?week_id= param; otherwise open on the week being played.
+        # Not "the first incomplete week": one week left open by a game that
+        # never got a score keeps that page pinned to it for the rest of the
+        # season, while the scores someone actually came here to enter sit a
+        # click away behind the week selector.
         week_id_param = request.query_params.get("week_id")
         if week_id_param:
             selected_week = next((w for w in weeks if str(w.id) == week_id_param), None)
+        if not selected_week:
+            now = datetime.utcnow()
+            started = [w for w in weeks if w.first_kickoff and w.first_kickoff <= now]
+            selected_week = started[-1] if started else None
         if not selected_week:
             selected_week = next((w for w in weeks if not w.is_completed), None)
         if not selected_week and weeks:

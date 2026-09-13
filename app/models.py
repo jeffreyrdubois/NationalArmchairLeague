@@ -21,6 +21,18 @@ class SpreadSource(str, enum.Enum):
     manual = "manual"
 
 
+class ScoreSource(str, enum.Enum):
+    """Where a game's score came from.
+
+    ``manual`` marks a score a contributor typed in by hand. The automatic
+    sync leaves those rows alone — a human who watched the game is a better
+    source than a feed that has not caught up yet, and silently overwriting
+    them is what made hand-entered finals disappear.
+    """
+    api = "api"
+    manual = "manual"
+
+
 class TeamPlayoffStatus(str, enum.Enum):
     """A team's playoff standing for a season.
 
@@ -181,6 +193,8 @@ class Game(Base):
     # Scores
     home_score = Column(Integer)
     away_score = Column(Integer)
+    score_source = Column(SAEnum(ScoreSource), default=ScoreSource.api)
+    score_updated_at = Column(DateTime)
     is_final = Column(Boolean, default=False)
     is_in_progress = Column(Boolean, default=False)
     quarter = Column(String(10))

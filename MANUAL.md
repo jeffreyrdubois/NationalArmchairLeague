@@ -180,12 +180,21 @@ Spreads are automatically fetched from the ESPN API but can be overridden manual
 
 ### Managing Scores (`/admin/scores`)
 If the automatic ESPN score sync isn't working, scores can be entered manually.
+The page opens on the week currently being played; use the week buttons for any other week.
 
 1. Enter the away and home scores for the game
 2. Check the **Final** box when the game is complete
 3. Click **Save**
 
-Marking a game as final immediately triggers scoring for all picks on that game.
+Marking a game as final immediately triggers scoring for all picks on that game, and correcting
+a score on a game that is already final re-scores those picks from the new score.
+
+A final you type in is flagged **Manual** and the automatic sync will not overwrite it. A score saved
+without **Final** is provisional, so the live sync may still refine it. Either way the sync only fills
+in games it actually has scores for — it never blanks a score or un-finals a finished game.
+To hand a game back to the sync, use **Clear score** (which also resets that game's picks to pending).
+
+> A game can be saved with only one score filled in — it just can't be marked final until both are there.
 
 > All spread and score changes are logged in the audit trail.
 
