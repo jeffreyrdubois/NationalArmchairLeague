@@ -16,7 +16,7 @@ from app.models import (
     generate_invite_code,
 )
 from app.auth import get_current_user, require_contributor, require_admin, hash_password
-from app.services import espn
+from app.services import espn, github_issues
 from app.services.scoring import update_game_results
 from app.utils import eastern_to_utc, to_eastern
 
@@ -433,12 +433,24 @@ async def admin_home(request: Request, db: Session = Depends(get_db)):
     for row in db.query(PushSubscription.user_id).all():
         sub_counts[row.user_id] = sub_counts.get(row.user_id, 0) + 1
 
+    # Issue reporting ("Submit an Issue" -> GitHub). The token itself never
+    # reaches the page — only a masked hint that one is saved.
+    gh = github_issues.get_config(db)
+    github_settings = {
+        "repo": gh["repo"],
+        "repo_source": gh["repo_source"],
+        "token_source": gh["token_source"],
+        "token_hint": github_issues.mask_token(gh["token"]),
+        "configured": gh["configured"],
+    }
+
     current_year = datetime.utcnow().year
     return templates.TemplateResponse(
         "admin/home.html",
         {
             "request": request,
             "user": user,
+            "github_settings": github_settings,
             "seasons": seasons,
             "season_weeks": season_weeks,
             "users": users,
@@ -1358,5 +1370,102 @@ async def send_notification(
     db.commit()
     return RedirectResponse(
         url=f"/admin/?msg={quote(f'Notification sent to {sent} subscription(s)')}",
+        status_code=303,
+    )
+
+
+# ─── Issue reporting (GitHub) ──────────────────────────────────────────────────
+
+@router.post("/github")
+async def update_github_settings(
+    request: Request,
+    github_repo: str = Form(""),
+    github_token: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """Save the repo/token used by "Submit an Issue", verifying them first.
+
+    Nothing is stored unless GitHub accepts the pair, so a typo cannot leave
+    the feedback page looking configured while every report silently fails.
+    A blank token means "keep the one already saved" — the page never shows
+    the token, so it cannot be re-typed accurately.
+    """
+    admin = get_current_user(request, db)
+    if not admin or admin.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    from urllib.parse import quote
+
+    repo = github_repo.strip()
+    token = github_token.strip()
+    current = github_issues.get_config(db)
+
+    if not repo:
+        repo = current["repo"]
+    if not token:
+        token = current["token"]
+
+    if not token:
+        return RedirectResponse(
+            url="/admin/?error=" + quote("Add a GitHub token — there isn't one saved yet.") + "#github",
+            status_code=303,
+        )
+
+    ok, message = await github_issues.verify(token, repo)
+    if not ok:
+        return RedirectResponse(
+            url="/admin/?error=" + quote(message) + "#github",
+            status_code=303,
+        )
+
+    github_issues.save_config(db, token=token, repo=repo)
+    db.add(AuditLog(
+        user_id=admin.id,
+        action="update_github_settings",
+        detail=f"Issue reporting pointed at {repo} (token verified)",
+    ))
+    db.commit()
+    return RedirectResponse(
+        url="/admin/?msg=" + quote(f"Issue reporting saved — {message}") + "#github",
+        status_code=303,
+    )
+
+
+@router.post("/github/test")
+async def test_github_settings(request: Request, db: Session = Depends(get_db)):
+    """Re-check the saved settings without changing them."""
+    admin = get_current_user(request, db)
+    if not admin or admin.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    from urllib.parse import quote
+
+    config = github_issues.get_config(db)
+    ok, message = await github_issues.verify(config["token"], config["repo"])
+    key = "msg" if ok else "error"
+    return RedirectResponse(
+        url=f"/admin/?{key}=" + quote(message) + "#github",
+        status_code=303,
+    )
+
+
+@router.post("/github/clear")
+async def clear_github_settings(request: Request, db: Session = Depends(get_db)):
+    """Forget the saved repo/token, falling back to the container's env vars."""
+    admin = get_current_user(request, db)
+    if not admin or admin.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    from urllib.parse import quote
+
+    github_issues.clear_config(db)
+    db.add(AuditLog(
+        user_id=admin.id,
+        action="clear_github_settings",
+        detail="Cleared the saved issue-reporting token and repository",
+    ))
+    db.commit()
+    return RedirectResponse(
+        url="/admin/?msg=" + quote("Saved GitHub settings cleared.") + "#github",
         status_code=303,
     )

@@ -260,7 +260,15 @@ async def all_picks_for_week(
         .order_by(Game.kickoff_time)
         .all()
     )
-    users = db.query(User).filter(User.is_active == True).all()
+    # The viewer's own column comes first so it sits inside the frozen block
+    # of the pick matrix — the point of comparing is comparing against yours.
+    users = (
+        db.query(User)
+        .filter(User.is_active == True)
+        .order_by(User.last_name, User.first_name)
+        .all()
+    )
+    users.sort(key=lambda u: u.id != user.id)
 
     pick_matrix = {}
     standings = []

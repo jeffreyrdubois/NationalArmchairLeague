@@ -111,6 +111,15 @@ The one exception is the admin panel's **Edit User Picks** screen, which an
 admin uses to enter picks on behalf of a player who sent them in by text. Every
 such edit is recorded in the admin audit log.
 
+### Reading the All Picks Grid
+After the lock, `/picks/week/{id}/all` shows every player's picks as one grid —
+one row per game, one column per player. It is wider than a phone screen, so the
+first four columns are frozen: the game, the spread, the result and **your own
+picks**, which are pulled to the front and tinted. Scroll sideways and those four
+stay put while the other players slide past, so you are always comparing against
+your own column. The row of player names and the totals row stay put as you
+scroll up and down.
+
 ### Important Timing Notes
 - **Spreads** may still update up until 24 hours before the first kickoff
 - **Picks lock** when the first game of the week begins — you cannot change picks after that
@@ -258,14 +267,24 @@ Any logged-in user can report a bug or suggestion from the **Submit an Issue** p
 a description and submit — the report is filed as an issue on the league's GitHub
 repository, with the submitter's name and email attached so admins can follow up.
 
-**Setup (admins):** issue reporting requires two environment variables:
+**Setup (admins):** open the Admin Panel and find **Issue Reporting (GitHub)**. Enter
+the repository (`owner/repo`) and a GitHub
+[fine-grained personal access token](https://github.com/settings/personal-access-tokens)
+with **read and write access to Issues** on that repository, then **Save & Verify**.
+The settings are checked against GitHub before they are saved, so a typo is reported
+straight away rather than silently swallowing every report. Nothing needs to go into
+`.env` and the container does not need restarting.
 
-| Variable | Description |
-|---|---|
-| `GITHUB_ISSUE_TOKEN` | A GitHub token with read/write access to Issues on the repo |
-| `GITHUB_ISSUE_REPO` | The `owner/repo` to file issues on (defaults to the project repo) |
+Once saved, the panel shows the repository and a masked hint of the token — the token
+itself is never displayed again, so to change it you paste a new one (leaving the token
+box blank keeps the saved one, which is how you correct the repository on its own).
+**Test Connection** re-checks the saved settings, and **Clear Saved Settings** removes
+them.
 
-Until these are set, the page still loads but tells users that reporting isn't available.
+The `GITHUB_ISSUE_TOKEN` / `GITHUB_ISSUE_REPO` environment variables (Section 10) still
+work and are used when nothing is saved in the app; anything saved in the Admin Panel
+takes precedence. Until one or the other is set, the page still loads but tells users
+that reporting isn't available.
 
 ---
 
@@ -283,8 +302,8 @@ any value, recreate the container so it's picked up — run `./update.sh` (or
 | `ODDS_API_KEY` | No | API key for [The Odds API](https://the-odds-api.com) used to **auto-fetch NFL point spreads**. If blank, auto-fetch is skipped and spreads are entered manually on `/admin/spreads`. |
 | `DATABASE_URL` | No (default set) | SQLite database location. The image already defaults to `sqlite:////app/data/nal.db`, which is the mounted `./data` volume, so leave it alone unless you are doing something unusual. |
 | `PUID` / `PGID` | No (default `99`/`100`) | User and group the app runs as, and the owner it gives files in `./data`. `99:100` (nobody:users) is the Unraid default and is almost always right. |
-| `GITHUB_ISSUE_TOKEN` | No | GitHub token with read/write access to Issues. Enables the **Submit an Issue** feature (Section 9). If blank, the feedback page shows a "not configured" notice. |
-| `GITHUB_ISSUE_REPO` | No (defaults to project repo) | The `owner/repo` that user-submitted issues are filed on. |
+| `GITHUB_ISSUE_TOKEN` | No | GitHub token with read/write access to Issues, enabling the **Submit an Issue** feature (Section 9). Optional even for that: setting it in the Admin Panel instead is the easier route, and a value saved there wins over this one. |
+| `GITHUB_ISSUE_REPO` | No (defaults to project repo) | The `owner/repo` that user-submitted issues are filed on. Also settable in the Admin Panel, which takes precedence. |
 
 > **Keep `.env` private.** It holds secrets (signing key, API tokens) and is excluded
 > from git via `.gitignore`, so it never gets committed or pulled — you maintain it

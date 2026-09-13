@@ -56,3 +56,16 @@ jobs:
       # drive the real pages and read the rendered HTML.
       - name: Test pick visibility before the lock
         run: python tests/test_pick_visibility.py
+
+      # The GitHub token for "Submit an Issue" is now entered in the app, which
+      # means the app is holding a credential: these check that a value saved
+      # there beats the container's environment, and that the token never comes
+      # back out in a page or the audit log.
+      - name: Test issue-reporting settings
+        run: python tests/test_issue_reporting.py
+
+      # The all-picks grid freezes the viewer's own column, which only works if
+      # the route orders the players with the viewer first — a plain-looking
+      # line that the whole side-by-side comparison rests on.
+      - name: Test the all-picks grid layout
+        run: python tests/test_pick_matrix_layout.py
