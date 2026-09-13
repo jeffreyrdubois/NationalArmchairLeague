@@ -20,6 +20,38 @@ logger = logging.getLogger(__name__)
 
 ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports/football/nfl"
 ESPN_CDN = "https://a.espncdn.com/i/teamlogos/nfl/500"
+
+# ESPN's scoreboard, three ways.
+#
+# `site.api` sits behind bot protection and can refuse a caller outright (see
+# ESPN_HEADERS below). The other two hosts serve the same scoreboard and are
+# not always blocked together, so a 403 on one is worth trying past rather
+# than falling straight back to nflverse, which has nothing at all until a
+# game is over.
+ESPN_SCOREBOARD_SOURCES = [
+    ("site.api", "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"),
+    ("web.api", "https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"),
+    ("cdn", "https://cdn.espn.com/core/nfl/scoreboard"),
+]
+
+# Ask as what we are, not as a browser.
+#
+# Claiming to be Chrome is what produced the 403s. Measured from the league
+# server, against all three hosts:
+#
+#     site.api  bare 200   browser headers 403
+#     web.api   bare 200   browser headers 200
+#     cdn       bare 200   browser headers 200
+#
+# A request carrying a Chrome User-Agent but none of a browser's other
+# evidence — cookies, sec-ch-* hints, a session — reads as a bot wearing a
+# costume, and site.api refuses it. The same request sent as curl or as
+# python-httpx is served without complaint. So send no User-Agent of our own
+# and let httpx identify itself honestly; the only header worth stating is
+# what we would like back.
+ESPN_HEADERS = {
+    "Accept": "application/json, text/plain, */*",
+}
 EASTERN = ZoneInfo("America/New_York")
 
 NFLVERSE_GAMES_URL = (
@@ -294,50 +326,91 @@ async def fetch_live_scores(season_year: int, week: int) -> list[dict]:
     return games
 
 
+def _scoreboard_params(name: str, season_year: int, week: int) -> dict:
+    """Query string for one scoreboard host — cdn.espn.com spells it its own way."""
+    if name == "cdn":
+        return {"xhr": 1, "year": season_year, "seasontype": 2, "week": week}
+    return {"seasontype": 2, "season": season_year, "week": week, "limit": 100}
+
+
+def _scoreboard_events(payload: dict) -> list[dict]:
+    """The events array, wherever this host keeps it.
+
+    The api hosts return it at the top level; cdn.espn.com wraps the same
+    scoreboard in the page payload it feeds the site with.
+    """
+    if not isinstance(payload, dict):
+        return []
+    events = payload.get("events")
+    if isinstance(events, list) and events:
+        return events
+    nested = payload.get("content", {})
+    if isinstance(nested, dict):
+        sb_data = nested.get("sbData", {})
+        if isinstance(sb_data, dict):
+            events = sb_data.get("events")
+            if isinstance(events, list):
+                return events
+    return []
+
+
+async def fetch_espn_scoreboard(season_year: int, week: int) -> tuple[list[dict], str | None, list[str]]:
+    """Try each ESPN scoreboard host in turn.
+
+    Returns ``(events, endpoint_name, attempts)``; attempts records what each
+    host said ("site.api 403", "cdn ok") so a week that never fills in can name
+    the host that refused instead of just "ESPN unreachable".
+    """
+    attempts: list[str] = []
+    async with httpx.AsyncClient(timeout=15, headers=ESPN_HEADERS, follow_redirects=True) as client:
+        for name, url in ESPN_SCOREBOARD_SOURCES:
+            try:
+                resp = await client.get(url, params=_scoreboard_params(name, season_year, week))
+                if resp.status_code != 200:
+                    attempts.append(f"{name} {resp.status_code}")
+                    continue
+                events = _scoreboard_events(resp.json())
+                if events:
+                    attempts.append(f"{name} ok")
+                    return events, name, attempts
+                attempts.append(f"{name} no games")
+            except Exception as e:
+                attempts.append(f"{name} {type(e).__name__}")
+                logger.warning(f"ESPN scoreboard via {name} failed: {e}")
+    return [], None, attempts
+
+
 async def fetch_live_scores_with_meta(season_year: int, week: int) -> tuple[list[dict], dict]:
     """``fetch_live_scores`` plus a note on where the rows came from.
 
-    Returns ``(games, meta)`` where meta is ``{"source", "error"}``. Source is
-    ``"espn"`` for live data, ``"nflverse"`` for the post-game fallback, or
-    None when neither answered.  The sync stores this so a week that never
-    fills in says why — an unreachable ESPN and an empty feed look identical
-    from the scores page otherwise.
+    Returns ``(games, meta)`` where meta is ``{"source", "endpoint", "error"}``.
+    Source is ``"espn"`` for live data, ``"nflverse"`` for the post-game
+    fallback, or None when neither answered.  The sync stores this so a week
+    that never fills in says why — an unreachable ESPN and an empty feed look
+    identical from the scores page otherwise.
     """
-    meta: dict = {"source": None, "error": None}
+    meta: dict = {"source": None, "endpoint": None, "error": None}
 
-    url = f"{ESPN_BASE}/scoreboard"
-    params = {"seasontype": 2, "season": season_year, "week": week, "limit": 100}
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        ),
-        "Accept": "application/json",
-    }
-    async with httpx.AsyncClient(timeout=15, headers=headers) as client:
-        try:
-            resp = await client.get(url, params=params)
-            resp.raise_for_status()
-            data = resp.json()
-            events = data.get("events", [])
-            if events:
-                meta["source"] = "espn"
-                return _parse_espn_scoreboard_events(events), meta
-            meta["error"] = "ESPN returned no games for this week"
-        except Exception as e:
-            meta["error"] = f"ESPN unreachable ({e}) — using nflverse, which only has finished games"
-            logger.warning(f"ESPN live scores unavailable ({e}); falling back to nflverse")
+    events, endpoint, attempts = await fetch_espn_scoreboard(season_year, week)
+    if events:
+        meta["source"] = "espn"
+        meta["endpoint"] = endpoint
+        return _parse_espn_scoreboard_events(events), meta
+
+    tried = ", ".join(attempts) or "no hosts tried"
+    meta["error"] = f"ESPN unavailable ({tried}) — using nflverse, which only has finished games"
+    logger.warning(f"ESPN live scores unavailable ({tried}); falling back to nflverse")
 
     try:
         games = await nflverse_week_rows(season_year, week)
     except Exception as e:
-        meta["error"] = f"{meta['error'] or 'ESPN returned nothing'}; nflverse also failed ({e})"
+        meta["error"] = f"{meta['error']}; nflverse also failed ({e})"
         return [], meta
 
     if games:
         meta["source"] = "nflverse"
     else:
-        meta["error"] = f"{meta['error'] or 'ESPN returned nothing'}; nflverse has no rows for this week either"
+        meta["error"] = f"{meta['error']}; nflverse has no rows for this week either"
     return games, meta
 
 
@@ -347,13 +420,7 @@ async def fetch_current_week_info() -> dict:
     Returns {"season": int, "week": int, "season_type": int}
     """
     url = f"{ESPN_BASE}/scoreboard"
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        ),
-        "Accept": "application/json",
-    }
+    headers = ESPN_HEADERS
     async with httpx.AsyncClient(timeout=10, headers=headers) as client:
         try:
             resp = await client.get(url, headers=headers)
