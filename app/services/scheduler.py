@@ -5,13 +5,14 @@ Background scheduler for automatic data fetching.
 - Tuesday morning: fetch new week schedule + spreads
 - Spread lock enforced 24h before first kickoff
 """
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
-from app.models import Season, Week, Game, ScoreSource, SpreadSource, Pick, User
+from app.models import AppSetting, Season, Week, Game, ScoreSource, SpreadSource, Pick, User
 from app.services import espn, odds, scoring
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,23 @@ def get_active_week(db: Session):
     return season, week
 
 
+def week_kickoff(db: Session, week: Week) -> datetime | None:
+    """When this week starts, from the week row or its earliest game.
+
+    ``first_kickoff`` is only written by a schedule sync, so a week whose games
+    arrived another way has none — and a week with no kickoff used to be left
+    out of the score sync entirely, silently, for the whole season.
+    """
+    if week.first_kickoff:
+        return week.first_kickoff
+    kickoffs = [
+        g.kickoff_time
+        for g in db.query(Game).filter(Game.week_id == week.id).all()
+        if g.kickoff_time is not None
+    ]
+    return min(kickoffs) if kickoffs else None
+
+
 def get_syncable_weeks(db: Session, season: Season) -> list[Week]:
     """Every unfinished week of a season that has already kicked off.
 
@@ -40,6 +58,11 @@ def get_syncable_weeks(db: Session, season: Season) -> list[Week]:
     game the feed never reports (a moved game, an ID that no longer matches)
     used to block score syncing for every week after it, so the current week's
     games sat on "Upcoming" all Sunday.
+
+    A missing ``espn_week`` no longer disqualifies a week either — the week
+    number is the same thing in every regular-season case, and requiring the
+    column meant a week set up by hand never synced a single score while its
+    spreads, which are matched on team name, filled in normally.
     """
     now = datetime.utcnow()
     weeks = (
@@ -47,13 +70,63 @@ def get_syncable_weeks(db: Session, season: Season) -> list[Week]:
         .filter(
             Week.season_id == season.id,
             Week.is_completed == False,  # noqa: E712
-            Week.espn_week != None,      # noqa: E711
-            Week.first_kickoff != None,  # noqa: E711
         )
         .order_by(Week.week_number)
         .all()
     )
-    return [w for w in weeks if w.first_kickoff <= now]
+    syncable = []
+    for week in weeks:
+        kickoff = week_kickoff(db, week)
+        if kickoff is not None and kickoff <= now:
+            syncable.append(week)
+    return syncable
+
+
+def _norm_team(abbr: str | None) -> str:
+    """Team abbreviation in ESPN's spelling, for comparing feed to database."""
+    a = (abbr or "").strip().upper()
+    return espn.NFLVERSE_TO_ESPN_ABBR.get(a, a)
+
+
+def match_feed_row_to_game(
+    db: Session, week: Week, gd: dict, games: list[Game] | None = None
+) -> Game | None:
+    """Find the stored game a feed row is about, by id or by matchup.
+
+    Matching on the feed's game id alone is brittle. A week imported before
+    nflverse had ESPN's event ids stored the nflverse ``2026_02_DET_BUF``
+    style id instead, and that never equals the numeric id the live feed
+    sends — so every score for that week was dropped on the floor while
+    spreads, matched on team name, kept filling in. That is exactly the
+    "spreads populate, scores don't" shape.
+
+    So: try the id, then fall back to the matchup within the week, and write
+    the feed's id back onto the row so later passes match directly.
+    """
+    feed_id = str(gd.get("espn_game_id") or "").strip()
+    if feed_id:
+        game = db.query(Game).filter(Game.espn_game_id == feed_id).first()
+        if game:
+            # An id belonging to another week is not this week's game.
+            return game if game.week_id == week.id else None
+
+    home, away = _norm_team(gd.get("home_team")), _norm_team(gd.get("away_team"))
+    if not home or not away:
+        return None
+    if games is None:
+        games = db.query(Game).filter(Game.week_id == week.id).all()
+
+    for game in games:
+        if _norm_team(game.home_team) == home and _norm_team(game.away_team) == away:
+            taken = any(g is not game and g.espn_game_id == feed_id for g in games)
+            if feed_id and game.espn_game_id != feed_id and not taken:
+                logger.info(
+                    f"Week {week.week_number}: {away}@{home} matched by matchup; "
+                    f"updating game id {game.espn_game_id} -> {feed_id}"
+                )
+                game.espn_game_id = feed_id
+            return game
+    return None
 
 
 def apply_feed_scores(db: Session, game: Game, gd: dict) -> bool:
@@ -117,35 +190,164 @@ def complete_week_if_done(db: Session, week: Week) -> bool:
     return True
 
 
-async def sync_scores():
+SCORE_SYNC_STATUS_KEY = "score_sync_status"
+
+
+def record_score_sync_status(db: Session, status: dict) -> None:
+    """Store what the last score sync did, so the scores page can show it.
+
+    Every way the score sync can come up empty — ESPN unreachable, a week the
+    feed has no rows for, game ids that no longer line up — used to be a line
+    in the container log and nothing else, which is why "the scores aren't
+    populating" had no answer short of reading the code.
+    """
+    try:
+        db.merge(AppSetting(key=SCORE_SYNC_STATUS_KEY, value=json.dumps(status)))
+        db.commit()
+    except Exception as e:  # never let bookkeeping break the sync
+        logger.warning(f"Could not record score sync status: {e}")
+        db.rollback()
+
+
+def get_score_sync_status(db: Session) -> dict | None:
+    """The stored status of the last score sync, with ran_at as a datetime."""
+    row = db.query(AppSetting).filter(AppSetting.key == SCORE_SYNC_STATUS_KEY).first()
+    if not row or not row.value:
+        return None
+    try:
+        status = json.loads(row.value)
+    except ValueError:
+        return None
+    try:
+        status["ran_at"] = datetime.fromisoformat(status["ran_at"])
+    except (KeyError, TypeError, ValueError):
+        status["ran_at"] = None
+    return status
+
+
+async def sync_week_scores(db: Session, season: Season, week: Week) -> dict:
+    """Pull the feed for one week and apply everything it has to say.
+
+    Returns a summary: which feed answered, how many of the week's games the
+    feed actually matched, and how many rows changed.
+    """
+    games = db.query(Game).filter(Game.week_id == week.id).all()
+    summary = {
+        "week": week.week_number,
+        "source": None,
+        "error": None,
+        "games": len(games),
+        "matched": 0,
+        "updated": 0,
+        "unmatched": [],
+    }
+
+    espn_week = week.espn_week or week.week_number
+    try:
+        game_data, meta = await espn.fetch_live_scores_with_meta(season.year, espn_week)
+    except Exception as fe:
+        logger.warning(f"Score fetch failed for week {week.week_number}: {fe}")
+        summary["error"] = str(fe)
+        return summary
+
+    summary["source"] = meta.get("source")
+    summary["error"] = meta.get("error")
+
+    matched_ids = set()
+    for gd in game_data:
+        game = match_feed_row_to_game(db, week, gd, games)
+        if not game:
+            continue
+        matched_ids.add(game.id)
+        if apply_feed_scores(db, game, gd):
+            summary["updated"] += 1
+
+    summary["matched"] = len(matched_ids)
+    summary["unmatched"] = [
+        f"{g.away_team}@{g.home_team}" for g in games if g.id not in matched_ids
+    ]
+    db.commit()   # persist any game ids healed by matching on the matchup
+
+    complete_week_if_done(db, week)
+    return summary
+
+
+async def sync_scores(trigger: str = "scheduled") -> dict:
     """Fetch live scores from ESPN and update every week still in play."""
     db = SessionLocal()
+    status = {"ran_at": datetime.utcnow().isoformat(), "trigger": trigger, "weeks": []}
     try:
         season = db.query(Season).filter(Season.is_active == True).first()  # noqa: E712
-        if not season or season.year == 9999:  # no season, or the test season
-            return
+        if not season:
+            status["error"] = "No active season"
+            return status
+        if season.year == 9999:  # the test season has no feed
+            status["error"] = "Test season — nothing to sync"
+            return status
 
-        for week in get_syncable_weeks(db, season):
+        weeks = get_syncable_weeks(db, season)
+        if not weeks:
+            status["error"] = "No week has kicked off yet"
+
+        for week in weeks:
             logger.info(f"Syncing scores for season {season.year} week {week.week_number}")
-            try:
-                game_data = await espn.fetch_live_scores(season.year, week.espn_week)
-            except Exception as fe:
-                logger.warning(f"Score fetch failed for week {week.week_number}: {fe}")
-                continue
+            status["weeks"].append(await sync_week_scores(db, season, week))
 
-            for gd in game_data:
-                game = db.query(Game).filter(Game.espn_game_id == gd["espn_game_id"]).first()
-                if not game or game.week_id != week.id:
-                    continue
-                apply_feed_scores(db, game, gd)
-
-            complete_week_if_done(db, week)
+        return status
 
     except Exception as e:
         logger.error(f"Score sync error: {e}")
         db.rollback()
+        status["error"] = str(e)
+        return status
     finally:
+        record_score_sync_status(db, status)
         db.close()
+
+
+async def sync_one_week_scores(week_id: int) -> dict:
+    """Score sync for a single week, for the admin "Sync Scores" button."""
+    db = SessionLocal()
+    status = {"ran_at": datetime.utcnow().isoformat(), "trigger": "manual", "weeks": []}
+    try:
+        week = db.query(Week).filter(Week.id == week_id).first()
+        if not week:
+            status["error"] = "Week not found"
+            return status
+        season = db.query(Season).filter(Season.id == week.season_id).first()
+        if not season:
+            status["error"] = "Season not found"
+            return status
+        if season.year == 9999:
+            status["error"] = "Cannot sync scores for the test season"
+            return status
+
+        status["weeks"].append(await sync_week_scores(db, season, week))
+        return status
+    except Exception as e:
+        logger.error(f"Manual score sync error: {e}")
+        db.rollback()
+        status["error"] = str(e)
+        return status
+    finally:
+        record_score_sync_status(db, status)
+        db.close()
+
+
+def describe_sync_summary(summary: dict) -> str:
+    """One line a contributor can act on, for the flash message."""
+    source = {"espn": "ESPN", "nflverse": "nflverse"}.get(summary.get("source"), "no feed")
+    parts = [
+        f"{source}: matched {summary.get('matched', 0)} of {summary.get('games', 0)} games, "
+        f"updated {summary.get('updated', 0)}"
+    ]
+    if summary.get("unmatched"):
+        shown = ", ".join(summary["unmatched"][:4])
+        more = len(summary["unmatched"]) - 4
+        parts.append(f"no feed row for {shown}{f' and {more} more' if more > 0 else ''}")
+    if summary.get("error"):
+        parts.append(summary["error"])
+    return " — ".join(parts)
 
 
 async def sync_week_schedule(season_year: int, week_number: int, espn_week: int) -> tuple[int, str | None]:
@@ -180,8 +382,16 @@ async def sync_week_schedule(season_year: int, week_number: int, espn_week: int)
             week.spread_lock_time = week.first_kickoff - timedelta(hours=24)
             week.espn_week = espn_week
 
+        week_games = db.query(Game).filter(Game.week_id == week.id).all()
         for gd in game_data:
-            existing = db.query(Game).filter(Game.espn_game_id == gd["espn_game_id"]).first()
+            # By id first, then by matchup: a week imported before nflverse
+            # carried ESPN's event ids holds ids the feed no longer sends, and
+            # matching on id alone inserted a second copy of the same game —
+            # leaving the picks on the old row and the scores on the new one.
+            existing = (
+                db.query(Game).filter(Game.espn_game_id == gd["espn_game_id"]).first()
+                or match_feed_row_to_game(db, week, gd, week_games)
+            )
             if existing:
                 # Update schedule info but preserve manual spreads
                 existing.kickoff_time = gd["kickoff_time"]

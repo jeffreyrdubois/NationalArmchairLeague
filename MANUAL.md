@@ -198,6 +198,19 @@ To hand a game back to the sync, use **Clear score** (which also resets that gam
 
 > All spread and score changes are logged in the audit trail.
 
+#### Sync Scores
+
+**Sync Scores** pulls the feed for the week you are looking at, the same way the background sync does
+every five minutes, and reports what happened right on the page:
+
+- **live from ESPN** — real-time scores, including games in progress
+- **nflverse (finished games only)** — ESPN was unreachable, so scores appear once a game is over
+- **no feed answered** — neither source returned anything for this week; enter scores by hand
+
+The line also says how many of the week's games the feed matched. A week that reads
+*matched 0 of 16* is the tell that the feed is answering but its games aren't lining up with the ones
+in the database — the sync now re-matches those by team and repairs them on the next pass.
+
 ---
 
 ## 8. Admin Guide — Managing the League
