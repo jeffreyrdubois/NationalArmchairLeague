@@ -208,10 +208,10 @@ every five minutes, and reports what happened right on the page:
 - **no feed answered** — neither source returned anything for this week; enter scores by hand
 
 ESPN's scoreboard is tried on three hosts (`site.api`, `web.api`, `cdn`) because its bot protection
-answers **403 Forbidden** to some servers without warning, and the hosts are not always blocked
-together. When every one refuses, the status line names them — `ESPN unavailable (site.api 403,
-web.api 403, cdn 403)` — and the week falls back to nflverse, which carries a game once it is over
-but nothing while it is being played.
+can answer **403 Forbidden** on one while the others serve the same scoreboard normally. When every
+one refuses, the status line names them — `ESPN unavailable (site.api 403, web.api 403, cdn 403)` —
+and the week falls back to nflverse, which carries a game once it is over but nothing while it is
+being played.
 
 The line also says how many of the week's games the feed matched. A week that reads
 *matched 0 of 16* is the tell that the feed is answering but its games aren't lining up with the ones

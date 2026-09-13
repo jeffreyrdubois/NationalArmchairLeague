@@ -15,6 +15,7 @@ finals that would not stick.
 Run with: python tests/test_score_entry.py
 """
 import os
+import pathlib
 import sys
 import tempfile
 
@@ -523,6 +524,24 @@ def _scoreboard_payload(host_style, event_id="401872656"):
     if host_style == "cdn":
         return {"content": {"sbData": {"events": [event]}}}
     return {"events": [event]}
+
+
+def test_espn_is_not_asked_as_a_browser():
+    """Measured against the live API: a Chrome User-Agent is what got a 403.
+
+    site.api served bare requests (curl, python-httpx) and refused the same
+    request carrying browser headers — a Chrome UA with none of a browser's
+    other evidence reads as a bot in a costume. Putting one back reintroduces
+    the outage this file exists to prevent.
+    """
+    from app.services import espn
+
+    for header in ("User-Agent", "Referer", "Origin", "Accept-Language"):
+        assert header not in espn.ESPN_HEADERS, f"{header} is what ESPN refuses"
+    assert "Accept" in espn.ESPN_HEADERS, espn.ESPN_HEADERS
+
+    source = pathlib.Path(espn.__file__).read_text()
+    assert "Mozilla" not in source, "no browser impersonation anywhere in the ESPN client"
 
 
 def test_cdn_payload_is_read_like_the_api_payload():

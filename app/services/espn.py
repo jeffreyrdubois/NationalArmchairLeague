@@ -23,29 +23,34 @@ ESPN_CDN = "https://a.espncdn.com/i/teamlogos/nfl/500"
 
 # ESPN's scoreboard, three ways.
 #
-# `site.api` answers 403 Forbidden for some callers — it sits behind bot
-# protection that judges the caller, not the request, so a server that has
-# never been blocked can start getting 403s and no amount of retrying helps.
-# The other two hosts serve the same scoreboard and are not always blocked at
-# the same time, so a 403 on one is worth trying past rather than falling
-# straight back to nflverse, which has nothing at all until a game is over.
+# `site.api` sits behind bot protection and can refuse a caller outright (see
+# ESPN_HEADERS below). The other two hosts serve the same scoreboard and are
+# not always blocked together, so a 403 on one is worth trying past rather
+# than falling straight back to nflverse, which has nothing at all until a
+# game is over.
 ESPN_SCOREBOARD_SOURCES = [
     ("site.api", "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"),
     ("web.api", "https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"),
     ("cdn", "https://cdn.espn.com/core/nfl/scoreboard"),
 ]
 
-# Headers a browser sends on espn.com. Without the Referer and the
-# Accept-Language, the bot protection has less reason to believe this is one.
+# Ask as what we are, not as a browser.
+#
+# Claiming to be Chrome is what produced the 403s. Measured from the league
+# server, against all three hosts:
+#
+#     site.api  bare 200   browser headers 403
+#     web.api   bare 200   browser headers 200
+#     cdn       bare 200   browser headers 200
+#
+# A request carrying a Chrome User-Agent but none of a browser's other
+# evidence — cookies, sec-ch-* hints, a session — reads as a bot wearing a
+# costume, and site.api refuses it. The same request sent as curl or as
+# python-httpx is served without complaint. So send no User-Agent of our own
+# and let httpx identify itself honestly; the only header worth stating is
+# what we would like back.
 ESPN_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    ),
     "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.espn.com/nfl/scoreboard",
-    "Origin": "https://www.espn.com",
 }
 EASTERN = ZoneInfo("America/New_York")
 
