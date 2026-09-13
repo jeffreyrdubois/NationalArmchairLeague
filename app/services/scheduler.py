@@ -235,6 +235,7 @@ async def sync_week_scores(db: Session, season: Season, week: Week) -> dict:
     summary = {
         "week": week.week_number,
         "source": None,
+        "endpoint": None,
         "error": None,
         "games": len(games),
         "matched": 0,
@@ -251,6 +252,7 @@ async def sync_week_scores(db: Session, season: Season, week: Week) -> dict:
         return summary
 
     summary["source"] = meta.get("source")
+    summary["endpoint"] = meta.get("endpoint")
     summary["error"] = meta.get("error")
 
     matched_ids = set()
@@ -337,6 +339,8 @@ async def sync_one_week_scores(week_id: int) -> dict:
 def describe_sync_summary(summary: dict) -> str:
     """One line a contributor can act on, for the flash message."""
     source = {"espn": "ESPN", "nflverse": "nflverse"}.get(summary.get("source"), "no feed")
+    if summary.get("source") == "espn" and summary.get("endpoint"):
+        source = f"ESPN ({summary['endpoint']})"
     parts = [
         f"{source}: matched {summary.get('matched', 0)} of {summary.get('games', 0)} games, "
         f"updated {summary.get('updated', 0)}"

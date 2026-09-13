@@ -509,6 +509,134 @@ def test_scores_page_shows_the_last_sync():
     db.close()
 
 
+def _scoreboard_payload(host_style, event_id="401872656"):
+    """A scoreboard reply shaped the way that host shapes it."""
+    event = {
+        "id": event_id,
+        "date": "2026-09-13T17:00Z",
+        "status": {"type": {"completed": True, "state": "post"}, "period": 4, "displayClock": "0:00"},
+        "competitions": [{"competitors": [
+            {"homeAway": "home", "score": "27", "team": {"abbreviation": "SEA", "displayName": "Seattle Seahawks"}},
+            {"homeAway": "away", "score": "13", "team": {"abbreviation": "NE", "displayName": "New England Patriots"}},
+        ]}],
+    }
+    if host_style == "cdn":
+        return {"content": {"sbData": {"events": [event]}}}
+    return {"events": [event]}
+
+
+def test_cdn_payload_is_read_like_the_api_payload():
+    """cdn.espn.com wraps the same scoreboard one layer deeper."""
+    from app.services import espn
+
+    for style in ("api", "cdn"):
+        events = espn._scoreboard_events(_scoreboard_payload(style))
+        assert len(events) == 1, (style, events)
+        assert events[0]["id"] == "401872656", (style, events)
+
+    assert espn._scoreboard_events({}) == []
+    assert espn._scoreboard_events({"content": {}}) == []
+    assert espn._scoreboard_events(None) == []
+
+
+def test_cdn_takes_its_week_in_its_own_spelling():
+    from app.services import espn
+
+    api = espn._scoreboard_params("site.api", 2026, 2)
+    assert api["season"] == 2026 and api["week"] == 2, api
+
+    cdn = espn._scoreboard_params("cdn", 2026, 2)
+    assert cdn["year"] == 2026 and cdn["week"] == 2 and cdn["xhr"] == 1, cdn
+
+
+def test_a_403_moves_on_to_the_next_espn_host():
+    """The live report: site.api answers 403, so try the others before nflverse."""
+    import asyncio
+
+    from app.services import espn
+
+    class FakeResponse:
+        def __init__(self, status_code, payload=None):
+            self.status_code = status_code
+            self._payload = payload or {}
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, replies):
+            self.replies = replies
+            self.asked = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, params=None):
+            self.asked.append(url)
+            return self.replies.pop(0)
+
+    client = FakeClient([
+        FakeResponse(403),
+        FakeResponse(403),
+        FakeResponse(200, _scoreboard_payload("cdn")),
+    ])
+    original = espn.httpx.AsyncClient
+    espn.httpx.AsyncClient = lambda *a, **k: client
+    try:
+        events, endpoint, attempts = asyncio.run(espn.fetch_espn_scoreboard(2026, 1))
+    finally:
+        espn.httpx.AsyncClient = original
+
+    assert len(events) == 1, events
+    assert endpoint == "cdn", endpoint
+    assert attempts == ["site.api 403", "web.api 403", "cdn ok"], attempts
+    assert len(client.asked) == 3, client.asked
+
+
+def test_every_host_refusing_names_them_all():
+    import asyncio
+
+    from app.services import espn
+
+    class FakeResponse:
+        status_code = 403
+
+        def json(self):
+            return {}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, params=None):
+            return FakeResponse()
+
+    original = espn.httpx.AsyncClient
+    espn.httpx.AsyncClient = lambda *a, **k: FakeClient()
+    try:
+        events, endpoint, attempts = asyncio.run(espn.fetch_espn_scoreboard(2026, 1))
+    finally:
+        espn.httpx.AsyncClient = original
+
+    assert events == [] and endpoint is None
+    assert attempts == ["site.api 403", "web.api 403", "cdn 403"], attempts
+
+
+def test_sync_summary_names_the_espn_host_that_answered():
+    line = scheduler.describe_sync_summary({
+        "week": 1, "source": "espn", "endpoint": "cdn", "games": 16,
+        "matched": 16, "updated": 4, "unmatched": [], "error": None,
+    })
+    assert "ESPN (cdn)" in line, line
+    assert "matched 16 of 16" in line, line
+
+
 def test_sync_status_round_trips():
     """The scores page reads this back; a bad write must not hide the sync."""
     db = SessionLocal()
