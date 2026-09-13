@@ -26,8 +26,13 @@
 
   {% if not configured %}
   <div class="bg-yellow-50 border border-yellow-300 text-yellow-800 rounded-lg px-4 py-3 mb-6 text-sm">
-    Issue reporting isn't set up on the server yet, so submissions can't be sent to GitHub.
-    An admin needs to configure <code>GITHUB_ISSUE_TOKEN</code> and <code>GITHUB_ISSUE_REPO</code>.
+    Issue reporting isn't set up yet, so submissions can't be sent to GitHub.
+    {% if is_admin %}
+    Add a GitHub repository and token under
+    <a href="/admin/#github" class="font-medium underline">Admin Panel &rarr; Issue Reporting</a>.
+    {% else %}
+    An admin can turn it on from the Admin Panel.
+    {% endif %}
   </div>
   {% endif %}
 

@@ -1,5 +1,65 @@
 {% extends "base.html" %}
 {% block title %}{% if revealed %}All Picks{% else %}Pick Status{% endif %} &mdash; {{ week.label or ('Week ' + week.week_number|string) }}{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* Frozen pick matrix: the first four columns (game, spread, result and the
+     viewer's own picks) stay put while the rest scroll sideways, and the
+     header and totals rows stay put while the games scroll past. Everything
+     lives inside one scroll container so both axes stick to the same box.
+
+     Sticky table cells need border-collapse: separate, which stops row
+     borders painting — hence the per-cell borders below. Sticky cells also
+     need an opaque background of their own, or the columns they scroll over
+     show through. */
+  .pm-wrap { overflow: auto; max-height: min(78vh, 900px); -webkit-overflow-scrolling: touch; }
+  .pm-table { border-collapse: separate; border-spacing: 0; }
+
+  .pm-table th,
+  .pm-table td { background-color: #fff; }
+  .pm-table tbody td { border-bottom: 1px solid #e5e7eb; }
+
+  .pm-table thead th {
+    position: sticky; top: 0; z-index: 20;
+    background-color: #f9fafb;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .pm-table tfoot td {
+    position: sticky; bottom: 0; z-index: 20;
+    background-color: #f9fafb;
+    border-top: 2px solid #e5e7eb;
+  }
+
+  /* The frozen columns. Widths are fixed because each column's `left` offset
+     is the sum of the ones before it. */
+  .pm-fz { position: sticky; z-index: 10; overflow: hidden; }
+  .pm-table thead .pm-fz,
+  .pm-table tfoot .pm-fz { z-index: 30; }
+
+  .pm-c1 { left: 0;     min-width: 104px; max-width: 104px; width: 104px; }
+  .pm-c2 { left: 104px; min-width: 52px;  max-width: 52px;  width: 52px;  }
+  .pm-c3 { left: 156px; min-width: 66px;  max-width: 66px;  width: 66px;  }
+  .pm-c4 { left: 222px; min-width: 56px;  max-width: 56px;  width: 56px;
+           box-shadow: 3px 0 5px -3px rgba(0, 0, 0, .35); }
+
+  @media (min-width: 640px) {
+    .pm-c1 { left: 0;     min-width: 200px; max-width: 200px; width: 200px; }
+    .pm-c2 { left: 200px; min-width: 88px;  max-width: 88px;  width: 88px;  }
+    .pm-c3 { left: 288px; min-width: 108px; max-width: 108px; width: 108px; }
+    .pm-c4 { left: 396px; min-width: 84px;  max-width: 84px;  width: 84px;  }
+  }
+
+  /* The viewer's own column, tinted like the standings row that marks them. */
+  .pm-table tbody .pm-you { background-color: #fefce8; }
+  .pm-table thead .pm-you,
+  .pm-table tfoot .pm-you { background-color: #fef9c3; }
+
+  /* Row hover has to be painted per cell for the same reason. */
+  .pm-table tbody tr:hover td { background-color: #f9fafb; }
+  .pm-table tbody tr:hover .pm-you { background-color: #fef9c3; }
+</style>
+{% endblock %}
+
 {% block content %}
 
 <h1 class="text-2xl font-bold mb-2">
@@ -83,17 +143,25 @@
 </div>
 
 <!-- Pick matrix -->
-<div class="bg-white rounded-xl shadow overflow-x-auto">
-  <table class="text-sm w-full">
-    <thead class="bg-gray-50">
+<p class="text-xs text-gray-500 mb-2">
+  Scroll sideways to compare &mdash; the game, spread, result and your own picks stay put,
+  and so does the row of names.
+</p>
+<div class="bg-white rounded-xl shadow pm-wrap">
+  <table class="text-sm w-full pm-table">
+    <thead>
       <tr>
-        <th class="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Game</th>
-        <th class="text-center px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Spread</th>
-        <th class="text-center px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Result</th>
+        <th class="pm-fz pm-c1 text-left px-2 sm:px-4 py-2 sm:py-3 font-medium text-gray-600 text-xs sm:text-sm whitespace-nowrap">Game</th>
+        <th class="pm-fz pm-c2 text-center px-1 sm:px-2 py-2 sm:py-3 font-medium text-gray-600 text-[10px] sm:text-sm leading-tight">
+          Spread<span class="block sm:hidden text-[9px] font-normal text-gray-400">home</span>
+        </th>
+        <th class="pm-fz pm-c3 text-center px-1 sm:px-2 py-2 sm:py-3 font-medium text-gray-600 text-[10px] sm:text-sm whitespace-nowrap">Result</th>
         {% for u in users %}
-        <th class="text-center px-3 py-3 font-medium text-gray-600 whitespace-nowrap">
+        <th class="{% if loop.first %}pm-fz pm-c4 px-1 sm:px-2{% else %}px-3{% endif %}
+                   {% if u.id == user.id %}pm-you{% endif %}
+                   text-center py-2 sm:py-3 font-medium text-gray-600 text-[10px] sm:text-sm whitespace-nowrap">
           <a href="/profile/{{ u.id }}" class="hover:underline">
-            {{ u.first_name }}
+            {% if u.id == user.id %}You{% else %}{{ u.first_name }}{% endif %}
           </a>
         </th>
         {% endfor %}
@@ -101,46 +169,48 @@
     </thead>
     <tbody>
       {% for game in games %}
-      <tr class="border-t hover:bg-gray-50">
-        <td class="px-4 py-3 whitespace-nowrap">
-          <div class="flex items-center gap-2">
-            <img src="{{ game.away_team_logo }}" class="w-6 h-6 object-contain" onerror="this.style.display='none'" />
-            <span class="text-gray-500">{{ game.away_team }}</span>
-            <span class="text-gray-400">@</span>
-            <span class="font-medium">{{ game.home_team }}</span>
-            <img src="{{ game.home_team_logo }}" class="w-6 h-6 object-contain" onerror="this.style.display='none'" />
+      <tr>
+        <td class="pm-fz pm-c1 px-2 sm:px-4 py-2 sm:py-3 whitespace-nowrap">
+          <div class="flex items-center gap-1 sm:gap-2">
+            <img src="{{ game.away_team_logo }}" class="hidden sm:block w-6 h-6 object-contain shrink-0" onerror="this.style.display='none'" />
+            <span class="text-gray-500 text-[11px] sm:text-sm">{{ game.away_team }}</span>
+            <span class="text-gray-400 text-[11px] sm:text-sm">@</span>
+            <span class="font-medium text-[11px] sm:text-sm">{{ game.home_team }}</span>
+            <img src="{{ game.home_team_logo }}" class="hidden sm:block w-6 h-6 object-contain shrink-0" onerror="this.style.display='none'" />
           </div>
         </td>
-        <td class="px-4 py-3 text-center text-xs text-gray-500">
+        <td class="pm-fz pm-c2 px-1 sm:px-2 py-2 sm:py-3 text-center text-[11px] sm:text-xs text-gray-500 whitespace-nowrap">
           {% if game.spread is not none %}
-            Home {{ "%.1f"|format(game.spread) }}
+            <span class="hidden sm:inline">Home </span>{{ "%.1f"|format(game.spread) }}
           {% else %}TBD{% endif %}
         </td>
-        <td class="px-4 py-3 text-center font-medium">
+        <td class="pm-fz pm-c3 px-1 sm:px-2 py-2 sm:py-3 text-center font-medium leading-tight">
           {% if game.is_final %}
-            <span class="text-xs">{{ game.away_score }}-{{ game.home_score }}</span><br/>
-            <span class="text-xs {% if game.home_covered %}text-green-600{% else %}text-blue-600{% endif %}">
-              {{ game.home_team if game.home_covered else game.away_team }} covered
+            <span class="text-[10px] sm:text-xs">{{ game.away_score }}-{{ game.home_score }}</span><br/>
+            <span class="text-[9px] sm:text-xs whitespace-nowrap {% if game.home_covered %}text-green-600{% else %}text-blue-600{% endif %}">
+              {{ game.home_team if game.home_covered else game.away_team }}<span class="hidden sm:inline"> covered</span><span class="sm:hidden"> &#10003;</span>
             </span>
           {% elif game.is_in_progress %}
-            <span class="text-xs live-pulse text-green-600">{{ game.away_score }}-{{ game.home_score }} LIVE</span>
+            <span class="text-[9px] sm:text-xs live-pulse text-green-600">{{ game.away_score }}-{{ game.home_score }} LIVE</span>
           {% else %}
-            <span class="text-xs text-gray-400">Upcoming</span>
+            <span class="text-[9px] sm:text-xs text-gray-400">Upcoming</span>
           {% endif %}
         </td>
 
         {% for u in users %}
         {% set pick = pick_matrix.get(u.id, {}).get(game.id) %}
-        <td class="px-3 py-3 text-center">
+        <td class="{% if loop.first %}pm-fz pm-c4 px-1 sm:px-2{% else %}px-3{% endif %}
+                   {% if u.id == user.id %}pm-you{% endif %}
+                   py-2 sm:py-3 text-center">
           {% if pick %}
           <div class="inline-flex flex-col items-center">
-            <span class="text-xs font-semibold
+            <span class="text-[11px] sm:text-xs font-semibold
               {% if pick.is_correct == true %}text-green-700
               {% elif pick.is_correct == false %}text-red-600
               {% else %}text-gray-700{% endif %}">
               {{ pick.picked_team }}
             </span>
-            <span class="text-xs rounded px-1 mt-0.5
+            <span class="text-[10px] sm:text-xs rounded px-1 mt-0.5
               {% if pick.is_correct == true %}bg-green-100 text-green-700
               {% elif pick.is_correct == false %}bg-red-100 text-red-600 line-through
               {% else %}bg-gray-100 text-gray-500{% endif %}">
@@ -155,12 +225,16 @@
       </tr>
       {% endfor %}
     </tbody>
-    <tfoot class="bg-gray-50 border-t-2">
+    <tfoot>
       <tr>
-        <td colspan="3" class="px-4 py-3 font-semibold text-sm">Total</td>
+        <td class="pm-fz pm-c1 px-2 sm:px-4 py-2 sm:py-3 font-semibold text-xs sm:text-sm">Total</td>
+        <td class="pm-fz pm-c2"></td>
+        <td class="pm-fz pm-c3"></td>
         {% for u in users %}
         {% set user_standings = standings|selectattr("user.id", "equalto", u.id)|first %}
-        <td class="px-3 py-3 text-center font-bold text-sm">
+        <td class="{% if loop.first %}pm-fz pm-c4 px-1 sm:px-2{% else %}px-3{% endif %}
+                   {% if u.id == user.id %}pm-you{% endif %}
+                   py-2 sm:py-3 text-center font-bold text-xs sm:text-sm">
           {{ user_standings.total|int if user_standings else '—' }}
         </td>
         {% endfor %}

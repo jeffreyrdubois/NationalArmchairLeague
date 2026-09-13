@@ -345,6 +345,87 @@
   </div>
 </div>
 
+<!-- ── Issue reporting (GitHub) ── -->
+<div class="bg-white rounded-xl shadow p-5 mb-8" id="github">
+  <h2 class="font-semibold text-lg mb-1">Issue Reporting (GitHub)</h2>
+  <p class="text-xs text-gray-500 mb-4">
+    Where the <a href="/feedback" class="underline">Submit an Issue</a> page files reports.
+    Saving here is all that's needed &mdash; no Docker config or restart.
+    Use a fine-grained personal access token with <strong>read and write access to Issues</strong>
+    on the repo below.
+  </p>
+
+  <div class="flex flex-wrap items-center gap-2 mb-4 text-sm">
+    {% if github_settings.configured %}
+    <span class="text-xs font-semibold bg-green-100 text-green-700 px-2 py-1 rounded">Configured</span>
+    {% else %}
+    <span class="text-xs font-semibold bg-yellow-100 text-yellow-800 px-2 py-1 rounded">Not configured</span>
+    {% endif %}
+    <span class="text-gray-500">
+      Repo <code class="text-gray-700">{{ github_settings.repo }}</code>
+      <span class="text-xs text-gray-400">
+        ({% if github_settings.repo_source == 'app' %}saved here{% elif github_settings.repo_source == 'env' %}from container config{% else %}default{% endif %})
+      </span>
+    </span>
+    <span class="text-gray-500">
+      Token
+      {% if github_settings.token_source %}
+      <code class="text-gray-700">{{ github_settings.token_hint }}</code>
+      <span class="text-xs text-gray-400">
+        ({% if github_settings.token_source == 'app' %}saved here{% else %}from container config{% endif %})
+      </span>
+      {% else %}
+      <span class="text-gray-400">none saved</span>
+      {% endif %}
+    </span>
+  </div>
+
+  <form method="post" action="/admin/github" class="space-y-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Repository</label>
+        <input name="github_repo" value="{{ github_settings.repo }}"
+          placeholder="owner/repository"
+          class="w-full border rounded px-3 py-1.5 text-sm" />
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">
+          Personal access token
+          {% if github_settings.token_source %}
+          <span class="text-gray-400">(leave blank to keep the saved one)</span>
+          {% endif %}
+        </label>
+        <input name="github_token" type="password" autocomplete="off"
+          placeholder="{% if github_settings.token_source %}••••••••{% else %}github_pat_…{% endif %}"
+          class="w-full border rounded px-3 py-1.5 text-sm" />
+      </div>
+    </div>
+    <p class="text-xs text-gray-400">
+      The token is checked against GitHub before it's saved, and is never shown again after that.
+    </p>
+    <button class="bg-yellow-400 text-gray-900 font-bold text-sm px-5 py-2 rounded-lg hover:bg-yellow-300">
+      Save &amp; Verify
+    </button>
+  </form>
+
+  <div class="flex flex-wrap gap-3 mt-4 pt-4 border-t">
+    <form method="post" action="/admin/github/test">
+      <button class="text-sm border px-3 py-1.5 rounded-lg hover:bg-gray-50"
+        {% if not github_settings.configured %}disabled title="Nothing to test yet"{% endif %}>
+        Test Connection
+      </button>
+    </form>
+    {% if github_settings.token_source == 'app' or github_settings.repo_source == 'app' %}
+    <form method="post" action="/admin/github/clear"
+      onsubmit="return confirm('Clear the saved GitHub token and repository? Reporting falls back to the container config, if any.')">
+      <button class="text-sm border border-red-300 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-50">
+        Clear Saved Settings
+      </button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
 <!-- ── Send Push Notification ── -->
 <div class="bg-white rounded-xl shadow p-5 mb-8" id="notify">
   <h2 class="font-semibold text-lg mb-1">Send Push Notification</h2>
