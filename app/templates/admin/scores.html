@@ -38,12 +38,44 @@
 <p class="text-gray-500 text-sm">No games for this week yet. <a href="/admin/week/{{ current_week.id }}" class="text-blue-600 underline">Sync from nflverse</a> first.</p>
 {% else %}
 
-<div class="flex items-center gap-3 mb-4">
+<div class="flex items-center gap-3 mb-4 flex-wrap">
   <h2 class="font-semibold text-lg">{{ current_week.label or ('Week ' + current_week.week_number|string) }}</h2>
   {% if current_week.is_completed %}
   <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Completed</span>
   {% endif %}
+  <form method="post" action="/admin/scores/sync" class="ml-auto">
+    <input type="hidden" name="week_id" value="{{ current_week.id }}" />
+    <button class="bg-gray-900 text-white text-sm px-3 py-1.5 rounded hover:bg-gray-700">
+      Sync Scores
+    </button>
+  </form>
 </div>
+
+{% if sync_status %}
+<div class="bg-white border rounded-xl px-4 py-3 mb-4 text-sm text-gray-600">
+  <div class="font-medium text-gray-800">
+    Last score sync:
+    {% if sync_status.ran_at %}{{ (sync_status.ran_at | eastern).strftime('%a %b %-d %-I:%M%p ET') }}{% else %}unknown{% endif %}
+    <span class="text-gray-400">({{ sync_status.trigger or 'scheduled' }})</span>
+  </div>
+  {% if sync_status.error %}
+  <div class="text-amber-700 mt-1">{{ sync_status.error }}</div>
+  {% endif %}
+  {% for w in sync_status.weeks or [] %}
+  <div class="mt-1">
+    Week {{ w.week }} &mdash;
+    {% if w.source == 'espn' %}live from ESPN{% elif w.source == 'nflverse' %}nflverse (finished games only){% else %}no feed answered{% endif %}:
+    matched {{ w.matched }} of {{ w.games }} games, updated {{ w.updated }}.
+    {% if w.unmatched %}
+    <span class="text-amber-700">No feed row for {{ w.unmatched | join(', ') }}.</span>
+    {% endif %}
+    {% if w.error %}
+    <span class="text-amber-700">{{ w.error }}</span>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
 
 <div class="space-y-3">
   {% for game in games %}

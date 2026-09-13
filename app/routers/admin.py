@@ -378,6 +378,36 @@ async def clear_score(
     return RedirectResponse(url=dest, status_code=303)
 
 
+@router.post("/scores/sync")
+async def sync_scores_now(
+    request: Request,
+    week_id: int = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Run the score sync for one week on demand, and say what it did.
+
+    Scores had no equivalent of the spreads page's "Sync Odds": they arrived
+    only from a background job that reported nothing anywhere a contributor
+    could see it, so a sync that matched none of the week's games looked
+    exactly like a sync that was never running.
+    """
+    user = get_current_user(request, db)
+    if not user or user.role not in (Role.contributor, Role.admin):
+        raise HTTPException(status_code=403)
+
+    from app.services.scheduler import sync_one_week_scores, describe_sync_summary
+    from urllib.parse import quote
+
+    status = await sync_one_week_scores(week_id)
+    summaries = status.get("weeks") or []
+    msg = describe_sync_summary(summaries[0]) if summaries else (
+        status.get("error") or "Nothing to sync."
+    )
+    return RedirectResponse(
+        url=f"/admin/scores?week_id={week_id}&msg={quote(msg)}", status_code=303
+    )
+
+
 @router.get("/scores", response_class=HTMLResponse)
 async def scores_page(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
@@ -422,6 +452,8 @@ async def scores_page(request: Request, db: Session = Depends(get_db)):
                 .all()
             )
 
+    from app.services.scheduler import get_score_sync_status
+
     return templates.TemplateResponse(
         "admin/scores.html",
         {
@@ -431,6 +463,7 @@ async def scores_page(request: Request, db: Session = Depends(get_db)):
             "weeks": weeks,
             "current_week": selected_week,
             "games": games,
+            "sync_status": get_score_sync_status(db),
         },
     )
 

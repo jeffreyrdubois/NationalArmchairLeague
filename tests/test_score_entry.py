@@ -307,6 +307,236 @@ def test_sync_covers_every_started_week_not_just_the_first():
     db.close()
 
 
+def match_row(game, espn_game_id, home=None, away=None):
+    """One feed row, as the live feed sends it: an id plus the matchup."""
+    return {
+        "espn_game_id": espn_game_id,
+        "home_team": home or game.home_team,
+        "away_team": away or game.away_team,
+        "home_score": None,
+        "away_score": None,
+        "is_final": False,
+        "is_in_progress": False,
+        "quarter": None,
+        "time_remaining": None,
+    }
+
+
+def test_feed_row_matches_by_matchup_when_the_id_moved():
+    """The "spreads populate, scores don't" shape.
+
+    A week imported before nflverse carried ESPN's event ids holds ids the live
+    feed never sends, so every score row was dropped while spreads — matched on
+    team name — filled in normally. Matching falls back to the matchup and
+    writes the feed's id onto the row.
+    """
+    db = SessionLocal()
+    week, contributor, games = make_week(db)
+    game = games[0]
+    stale_id = game.espn_game_id
+
+    matched = scheduler.match_feed_row_to_game(db, week, match_row(game, "401872932"))
+    assert matched is not None and matched.id == game.id, "feed row must find its game"
+
+    db.commit()
+    db.refresh(game)
+    assert game.espn_game_id == "401872932", game.espn_game_id
+    assert game.espn_game_id != stale_id
+    db.close()
+
+
+def test_matched_row_scores_the_game():
+    """End to end: a row whose id does not match still updates the score."""
+    db = SessionLocal()
+    week, contributor, games = make_week(db)
+    game = games[0]
+
+    row = match_row(game, "401872933")
+    row.update({"home_score": 27, "away_score": 13, "is_final": True})
+    matched = scheduler.match_feed_row_to_game(db, week, row)
+    assert scheduler.apply_feed_scores(db, matched, row) is True
+
+    reload(db, game)
+    assert game.is_final is True and game.home_score == 27, (game.is_final, game.home_score)
+    pick = db.query(Pick).filter(Pick.game_id == game.id).first()
+    assert pick.is_correct is True, "picks are scored off a matched feed row"
+    db.close()
+
+
+def test_feed_row_for_another_week_is_not_borrowed():
+    db = SessionLocal()
+    week_a, _, games_a = make_week(db)
+    week_b, _, games_b = make_week(db)
+
+    # Week B's feed row carrying week A's game id belongs to neither: the id
+    # wins, and it is not this week's game.
+    row = match_row(games_b[0], games_a[0].espn_game_id)
+    assert scheduler.match_feed_row_to_game(db, week_b, row) is None
+    db.close()
+
+
+def test_unknown_matchup_matches_nothing():
+    db = SessionLocal()
+    week, _, games = make_week(db)
+    row = match_row(games[0], "401999999", home="ZZZ", away="YYY")
+    assert scheduler.match_feed_row_to_game(db, week, row) is None
+    db.close()
+
+
+def test_week_with_no_espn_week_still_syncs():
+    """A week set up by hand synced spreads but never a single score."""
+    from datetime import datetime, timedelta
+
+    db = SessionLocal()
+    season = Season(year=next(_next_year), is_active=True)
+    db.add(season)
+    db.flush()
+    week = Week(season_id=season.id, week_number=1)   # no espn_week, no first_kickoff
+    db.add(week)
+    db.flush()
+    db.add(Game(
+        week_id=week.id,
+        espn_game_id=f"kickoff-{week.id}",
+        home_team="NE", away_team="SEA",
+        kickoff_time=datetime.utcnow() - timedelta(hours=3),
+    ))
+    db.commit()
+
+    assert [w.week_number for w in scheduler.get_syncable_weeks(db, season)] == [1]
+    db.close()
+
+
+def test_week_whose_games_have_not_kicked_off_is_skipped():
+    from datetime import datetime, timedelta
+
+    db = SessionLocal()
+    season = Season(year=next(_next_year), is_active=True)
+    db.add(season)
+    db.flush()
+    week = Week(season_id=season.id, week_number=1)
+    db.add(week)
+    db.flush()
+    db.add(Game(
+        week_id=week.id,
+        espn_game_id=f"future-{week.id}",
+        home_team="NE", away_team="SEA",
+        kickoff_time=datetime.utcnow() + timedelta(days=3),
+    ))
+    db.commit()
+
+    assert scheduler.get_syncable_weeks(db, season) == []
+    db.close()
+
+
+def test_nflverse_cache_expires():
+    """The fallback feed used to freeze on the first snapshot it ever fetched."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.services import espn
+
+    espn._nflverse_cache = [{"season": "2026"}]
+    espn._nflverse_fetched_at = datetime.now(timezone.utc)
+    assert espn._cache_is_fresh() is True
+
+    stale = datetime.now(timezone.utc) + espn.NFLVERSE_CACHE_TTL + timedelta(seconds=1)
+    assert espn._cache_is_fresh(now=stale) is False, "a cached CSV must not be served forever"
+
+    espn._nflverse_cache = None
+    espn._nflverse_fetched_at = None
+    assert espn._cache_is_fresh() is False
+
+
+def _patch_feed(rows, source="espn", error=None):
+    """Swap the live feed for a canned response; returns the undo."""
+    from app.services import espn
+
+    original = espn.fetch_live_scores_with_meta
+
+    async def fake(season_year, week):
+        return rows, {"source": source, "error": error}
+
+    espn.fetch_live_scores_with_meta = fake
+    return lambda: setattr(espn, "fetch_live_scores_with_meta", original)
+
+
+def test_sync_button_scores_a_week_whose_ids_are_stale():
+    """The whole path: button -> feed -> matched by matchup -> picks scored."""
+    db = SessionLocal()
+    week, contributor, games = make_week(db)
+    rows = []
+    for i, game in enumerate(games):
+        row = match_row(game, f"40188000{i}")
+        row.update({"home_score": 24, "away_score": 10, "is_final": True})
+        rows.append(row)
+
+    undo = _patch_feed(rows)
+    try:
+        resp = client_for(contributor).post(
+            "/admin/scores/sync", data={"week_id": week.id}, follow_redirects=False
+        )
+    finally:
+        undo()
+    assert resp.status_code == 303, (resp.status_code, resp.text[:200])
+    from urllib.parse import unquote
+    assert "matched 2 of 2" in unquote(resp.headers["location"]), resp.headers["location"]
+
+    reload(db, *games)
+    for game in games:
+        assert game.is_final is True and game.home_score == 24, (game.is_final, game.home_score)
+        assert game.espn_game_id.startswith("40188000"), game.espn_game_id
+    assert all(p.is_correct is True for p in db.query(Pick).filter(Pick.week_id == week.id))
+
+    status = scheduler.get_score_sync_status(db)
+    assert status["trigger"] == "manual" and status["weeks"][0]["updated"] == 2, status
+    db.close()
+
+
+def test_scores_page_shows_the_last_sync():
+    db = SessionLocal()
+    week, contributor, games = make_week(db)
+    scheduler.record_score_sync_status(db, {
+        "ran_at": "2026-09-13T18:05:00",
+        "trigger": "scheduled",
+        "weeks": [{"week": week.week_number, "source": "nflverse", "games": 2,
+                   "matched": 1, "updated": 0, "unmatched": ["A1@H1"], "error": None}],
+    })
+
+    resp = client_for(contributor).get(f"/admin/scores?week_id={week.id}")
+    assert resp.status_code == 200, resp.status_code
+    assert "Last score sync" in resp.text
+    assert "matched 1 of 2 games" in resp.text, "the page must say what the feed matched"
+    assert "A1@H1" in resp.text, "a game the feed never mentions has to be visible"
+    db.close()
+
+
+def test_sync_status_round_trips():
+    """The scores page reads this back; a bad write must not hide the sync."""
+    db = SessionLocal()
+    status = {
+        "ran_at": "2026-09-13T18:05:00",
+        "trigger": "manual",
+        "weeks": [{"week": 2, "source": "espn", "games": 16, "matched": 16, "updated": 3,
+                   "unmatched": [], "error": None}],
+    }
+    scheduler.record_score_sync_status(db, status)
+
+    stored = scheduler.get_score_sync_status(db)
+    assert stored["trigger"] == "manual", stored
+    assert stored["ran_at"].hour == 18, stored["ran_at"]
+    assert stored["weeks"][0]["matched"] == 16, stored["weeks"]
+    db.close()
+
+
+def test_sync_summary_names_what_the_feed_missed():
+    line = scheduler.describe_sync_summary({
+        "week": 2, "source": None, "games": 16, "matched": 0, "updated": 0,
+        "unmatched": ["DET@BUF", "CAR@ATL"], "error": "ESPN unreachable (timeout)",
+    })
+    assert "matched 0 of 16" in line, line
+    assert "DET@BUF" in line, line
+    assert "ESPN unreachable" in line, line
+
+
 if __name__ == "__main__":
     Base.metadata.create_all(bind=engine)
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

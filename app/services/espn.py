@@ -12,7 +12,7 @@ import io
 import asyncio
 import httpx
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -26,8 +26,17 @@ NFLVERSE_GAMES_URL = (
     "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv"
 )
 
-# In-process cache for the nflverse CSV rows
+# In-process cache for the nflverse CSV rows.
+#
+# The cache has a short life on purpose. Without the expiry the fallback feed
+# froze solid: the CSV was fetched once — usually at the first schedule sync,
+# before the season — and every score sync for the rest of the container's
+# life re-read that same snapshot, so scores nflverse published later never
+# arrived. Whenever ESPN was unreachable that made scores stop populating
+# entirely until someone restarted the app.
+NFLVERSE_CACHE_TTL = timedelta(minutes=15)
 _nflverse_cache: list[dict] | None = None
+_nflverse_fetched_at: datetime | None = None
 
 # nflverse uses a few different abbreviations from ESPN
 NFLVERSE_TO_ESPN_ABBR: dict[str, str] = {
@@ -111,22 +120,39 @@ def _round_spread(spread: float) -> float:
     return halves / 2.0
 
 
+def _cache_is_fresh(now: datetime | None = None) -> bool:
+    """True while the cached CSV is still young enough to serve."""
+    if _nflverse_cache is None or _nflverse_fetched_at is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    return now - _nflverse_fetched_at < NFLVERSE_CACHE_TTL
+
+
 async def _load_nflverse_games() -> list[dict]:
     """
     Download and cache the nflverse games CSV from GitHub.
-    Covers all NFL regular-season and playoff games from 1999 to the most
-    recently completed season.  ~2 MB; cached in-process after first fetch.
+    Covers every NFL game from 1999 through the current season, scores included
+    once each game is played.  ~2 MB; cached in-process for NFLVERSE_CACHE_TTL
+    so a long-running container keeps picking up newly published scores.
     """
-    global _nflverse_cache
-    if _nflverse_cache is not None:
+    global _nflverse_cache, _nflverse_fetched_at
+    if _cache_is_fresh():
         return _nflverse_cache
 
     logger.info("Fetching nflverse games CSV from GitHub…")
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(NFLVERSE_GAMES_URL)
-        resp.raise_for_status()
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(NFLVERSE_GAMES_URL)
+            resp.raise_for_status()
+    except Exception as e:
+        if _nflverse_cache is not None:
+            # A stale copy beats no schedule at all; try again next pass.
+            logger.warning(f"nflverse refresh failed ({e}); serving cached copy")
+            return _nflverse_cache
+        raise
 
     _nflverse_cache = list(csv.DictReader(io.StringIO(resp.text)))
+    _nflverse_fetched_at = datetime.now(timezone.utc)
     logger.info(f"Loaded {len(_nflverse_cache)} games from nflverse")
     return _nflverse_cache
 
@@ -134,15 +160,23 @@ async def _load_nflverse_games() -> list[dict]:
 async def fetch_week_schedule(season_year: int, week: int) -> list[dict]:
     """
     Fetch NFL schedule for a given season year and week number.
-    Uses nflverse historical data (GitHub CSV) — works for all past seasons
-    without ESPN API access restrictions.
-    Returns a list of game dicts.
+    Uses nflverse data (GitHub CSV) — works for every season without ESPN API
+    access restrictions.  Returns a list of game dicts, empty on failure.
     """
     try:
-        all_games = await _load_nflverse_games()
+        return await nflverse_week_rows(season_year, week)
     except Exception as e:
         logger.error(f"nflverse games fetch failed: {e}")
         return []
+
+
+async def nflverse_week_rows(season_year: int, week: int) -> list[dict]:
+    """The nflverse rows for one week, raising if the CSV cannot be read.
+
+    ``fetch_week_schedule`` swallows the error; callers that need to report
+    *why* a sync came back empty use this one.
+    """
+    all_games = await _load_nflverse_games()
 
     week_games = [
         g for g in all_games
@@ -256,6 +290,21 @@ async def fetch_live_scores(season_year: int, week: int) -> list[dict]:
     Fetch live NFL scores.  Tries ESPN scoreboard first for real-time updates;
     if ESPN is unreachable, falls back to nflverse data (completed games only).
     """
+    games, _meta = await fetch_live_scores_with_meta(season_year, week)
+    return games
+
+
+async def fetch_live_scores_with_meta(season_year: int, week: int) -> tuple[list[dict], dict]:
+    """``fetch_live_scores`` plus a note on where the rows came from.
+
+    Returns ``(games, meta)`` where meta is ``{"source", "error"}``. Source is
+    ``"espn"`` for live data, ``"nflverse"`` for the post-game fallback, or
+    None when neither answered.  The sync stores this so a week that never
+    fills in says why — an unreachable ESPN and an empty feed look identical
+    from the scores page otherwise.
+    """
+    meta: dict = {"source": None, "error": None}
+
     url = f"{ESPN_BASE}/scoreboard"
     params = {"seasontype": 2, "season": season_year, "week": week, "limit": 100}
     headers = {
@@ -272,11 +321,24 @@ async def fetch_live_scores(season_year: int, week: int) -> list[dict]:
             data = resp.json()
             events = data.get("events", [])
             if events:
-                return _parse_espn_scoreboard_events(events)
+                meta["source"] = "espn"
+                return _parse_espn_scoreboard_events(events), meta
+            meta["error"] = "ESPN returned no games for this week"
         except Exception as e:
+            meta["error"] = f"ESPN unreachable ({e}) — using nflverse, which only has finished games"
             logger.warning(f"ESPN live scores unavailable ({e}); falling back to nflverse")
 
-    return await fetch_week_schedule(season_year, week)
+    try:
+        games = await nflverse_week_rows(season_year, week)
+    except Exception as e:
+        meta["error"] = f"{meta['error'] or 'ESPN returned nothing'}; nflverse also failed ({e})"
+        return [], meta
+
+    if games:
+        meta["source"] = "nflverse"
+    else:
+        meta["error"] = f"{meta['error'] or 'ESPN returned nothing'}; nflverse has no rows for this week either"
+    return games, meta
 
 
 async def fetch_current_week_info() -> dict:
