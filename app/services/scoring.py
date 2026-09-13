@@ -81,16 +81,27 @@ def get_week_standings(db: Session, week_id: int) -> list[dict]:
                 "correct": 0,
                 "wrong": 0,
                 "pending": 0,
+                "outstanding": 0.0,
             }
         if pick.is_correct is None:
             users_picks[uid]["pending"] += 1
+            users_picks[uid]["outstanding"] += pick.confidence_points or 0
         elif pick.is_correct:
             users_picks[uid]["correct"] += 1
             users_picks[uid]["total"] += pick.points_earned or 0
         else:
             users_picks[uid]["wrong"] += 1
 
-    return sorted(users_picks.values(), key=lambda x: x["total"], reverse=True)
+    # Potential = points already banked plus everything still up for grabs,
+    # i.e. the most this player can finish the week with.
+    for row in users_picks.values():
+        row["potential"] = row["total"] + row["outstanding"]
+
+    return sorted(
+        users_picks.values(),
+        key=lambda x: (x["total"], x["potential"]),
+        reverse=True,
+    )
 
 
 def get_season_standings(db: Session, season_id: int) -> list[dict]:
