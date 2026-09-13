@@ -34,9 +34,74 @@ def score_pick(pick: Pick, game: Game) -> None:
     pick.points_earned = float(pick.confidence_points) if pick.is_correct else 0.0
 
 
+def clear_pick_scores(db: Session, game: Game) -> int:
+    """Reset every pick on a game back to pending. Returns how many changed."""
+    reset = 0
+    for pick in db.query(Pick).filter(Pick.game_id == game.id).all():
+        if pick.is_correct is not None or pick.points_earned is not None:
+            reset += 1
+        pick.is_correct = None
+        pick.points_earned = None
+    return reset
+
+
+def unscore_game(db: Session, game: Game) -> None:
+    """Reset a game and all its picks back to an unscored/pending state.
+
+    A pick may only carry a result while its game is final with a score on it,
+    so anything that takes a game out of the final state has to come through
+    here — otherwise the grid shows a game as "Upcoming" while the picks beside
+    it are still painted right or wrong.
+    """
+    game.home_score = None
+    game.away_score = None
+    game.is_final = False
+    game.is_in_progress = False
+    game.quarter = None
+    game.time_remaining = None
+    game.home_covered = None
+    clear_pick_scores(db, game)
+
+
+def repair_pick_scoring(db: Session) -> int:
+    """Clear results left on picks whose game is no longer final.
+
+    Older versions let the score sync blank out a hand-entered final without
+    touching the picks, which stranded games as "Upcoming" with red and green
+    picks beside them. This puts those rows back to pending so the next score
+    entry scores them cleanly. Returns the number of picks repaired.
+    """
+    stale_games = (
+        db.query(Game)
+        .join(Pick, Pick.game_id == Game.id)
+        .filter(
+            (Game.is_final == False) | (Game.is_final == None),  # noqa: E711,E712
+            (Pick.is_correct != None) | (Pick.points_earned != None),  # noqa: E711
+        )
+        .distinct()
+        .all()
+    )
+    repaired = 0
+    for game in stale_games:
+        repaired += clear_pick_scores(db, game)
+        game.home_covered = None
+    if repaired:
+        db.commit()
+        logger.warning(
+            f"Repaired {repaired} pick(s) scored against "
+            f"{len(stale_games)} game(s) that are not final — "
+            "re-enter those scores to restore the results"
+        )
+    return repaired
+
+
 def update_game_results(db: Session, game: Game) -> None:
     """
     After a game becomes final, compute coverage and score all picks for it.
+
+    Safe to call again on an already-final game: coverage and every pick are
+    recomputed from the current score, so correcting a score corrects the
+    results that came from it.
     """
     if not game.is_final:
         return

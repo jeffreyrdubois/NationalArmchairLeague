@@ -64,6 +64,13 @@ jobs:
       - name: Test issue-reporting settings
         run: python tests/test_issue_reporting.py
 
+      # Scores are where the league's results come from, and the score sync
+      # used to overwrite hand-entered finals with whatever the feed said —
+      # which blanked them minutes after a contributor saved them and left
+      # finished games reading "Upcoming" beside picks already scored.
+      - name: Test score entry and the score sync
+        run: python tests/test_score_entry.py
+
       # The all-picks grid freezes the viewer's own column, which only works if
       # the route orders the players with the viewer first — a plain-looking
       # line that the whole side-by-side comparison rests on.

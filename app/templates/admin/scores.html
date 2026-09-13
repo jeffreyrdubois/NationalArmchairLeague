@@ -3,7 +3,12 @@
 {% block content %}
 
 <h1 class="text-2xl font-bold mb-2">Manage Scores</h1>
-<p class="text-sm text-gray-500 mb-6">Use this to enter or correct scores for any week. Marking a game Final triggers pick scoring automatically.</p>
+<p class="text-sm text-gray-500 mb-6">
+  Use this to enter or correct scores for any week. Marking a game Final scores every pick on it
+  immediately, and correcting a final score re-scores them. A final you enter here is kept as-is &mdash;
+  the automatic sync will not overwrite it. Use <span class="font-medium">Clear score</span> to hand a
+  game back to the sync.
+</p>
 
 {% if not weeks %}
 <p class="text-gray-500">No active season.</p>
@@ -55,6 +60,9 @@
         {{ (game.kickoff_time | eastern).strftime('%-m/%-d %I:%M%p ET') if game.kickoff_time else '' }}
         {% if game.is_final %}<span class="ml-2 text-green-600 font-medium">Final</span>
         {% elif game.is_in_progress %}<span class="ml-2 text-green-600 live-pulse">Live</span>{% endif %}
+        {% if game.score_source and game.score_source.value == 'manual' and game.is_final %}
+        <span class="ml-2 text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded" title="Entered by hand — the automatic sync leaves this alone">Manual</span>
+        {% endif %}
       </div>
     </div>
     <div class="flex flex-wrap items-center gap-3">

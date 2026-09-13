@@ -28,6 +28,7 @@ def init_db():
     from app import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
     _migrate()
+    _repair()
 
 
 def _migrate():
@@ -47,6 +48,17 @@ def _migrate():
         if "notif_week_results" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN notif_week_results BOOLEAN DEFAULT 1"))
 
+        # --- games table ---
+        game_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(games)")).fetchall()}
+        if game_cols and "score_source" not in game_cols:
+            # Existing scores came from the feed; anything typed by hand from
+            # here on is re-flagged as manual when it is saved.
+            conn.execute(text(
+                "ALTER TABLE games ADD COLUMN score_source VARCHAR(10) DEFAULT 'api'"
+            ))
+        if game_cols and "score_updated_at" not in game_cols:
+            conn.execute(text("ALTER TABLE games ADD COLUMN score_updated_at DATETIME"))
+
         # --- playoff_teams table ---
         # Existing rows predate the 3-state model and all represent clinched
         # teams, so backfill the new status column with 'clinched'.
@@ -60,3 +72,14 @@ def _migrate():
             ))
 
         conn.commit()
+
+
+def _repair():
+    """Put rows the old score sync left inconsistent back into a sane state."""
+    from app.services.scoring import repair_pick_scoring
+
+    db = SessionLocal()
+    try:
+        repair_pick_scoring(db)
+    finally:
+        db.close()

@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
-from app.models import Season, Week, Game, SpreadSource, Pick, User
+from app.models import Season, Week, Game, ScoreSource, SpreadSource, Pick, User
 from app.services import espn, odds, scoring
 
 logger = logging.getLogger(__name__)
@@ -33,55 +33,113 @@ def get_active_week(db: Session):
     return season, week
 
 
+def get_syncable_weeks(db: Session, season: Season) -> list[Week]:
+    """Every unfinished week of a season that has already kicked off.
+
+    Deliberately not just the first unfinished week: one week left open by a
+    game the feed never reports (a moved game, an ID that no longer matches)
+    used to block score syncing for every week after it, so the current week's
+    games sat on "Upcoming" all Sunday.
+    """
+    now = datetime.utcnow()
+    weeks = (
+        db.query(Week)
+        .filter(
+            Week.season_id == season.id,
+            Week.is_completed == False,  # noqa: E712
+            Week.espn_week != None,      # noqa: E711
+            Week.first_kickoff != None,  # noqa: E711
+        )
+        .order_by(Week.week_number)
+        .all()
+    )
+    return [w for w in weeks if w.first_kickoff <= now]
+
+
+def apply_feed_scores(db: Session, game: Game, gd: dict) -> bool:
+    """Apply one feed row to a game, refusing anything that loses information.
+
+    The feed is only ever allowed to *add* what it knows. It may not blank a
+    score, un-final a finished game, or overwrite what a contributor typed in
+    by hand — all three used to happen every five minutes whenever ESPN was
+    unreachable and the nflverse fallback had not published the week yet, which
+    is what made hand-entered finals vanish and finished games read "Upcoming".
+
+    Returns True if the game was changed.
+    """
+    if game.score_source == ScoreSource.manual:
+        return False  # a human entered this; the feed does not get a vote
+
+    has_scores = gd["home_score"] is not None and gd["away_score"] is not None
+    if not has_scores:
+        return False  # feed has nothing for this game yet — leave it alone
+    if game.is_final and not gd["is_final"]:
+        return False  # a finished game does not come back to life
+
+    was_final = game.is_final
+    game.home_score = gd["home_score"]
+    game.away_score = gd["away_score"]
+    game.is_final = gd["is_final"]
+    game.is_in_progress = gd["is_in_progress"]
+    game.quarter = gd["quarter"]
+    game.time_remaining = gd["time_remaining"]
+    game.score_source = ScoreSource.api
+    game.score_updated_at = datetime.utcnow()
+
+    if gd["is_final"] and not was_final:
+        scoring.update_game_results(db, game)
+    else:
+        db.commit()
+    return True
+
+
+def complete_week_if_done(db: Session, week: Week) -> bool:
+    """Mark a week complete once every game is final, and notify. """
+    all_games = db.query(Game).filter(Game.week_id == week.id).all()
+    if not all_games or not all(g.is_final for g in all_games):
+        return False
+
+    week.is_completed = True
+    db.commit()
+    logger.info(f"Week {week.week_number} is now completed")
+    # Fire week-results push notifications
+    try:
+        from app.services.notifications import send_to_all
+        sent = send_to_all(
+            title="Week Results Are In!",
+            body=f"Week {week.week_number} is complete — check the standings.",
+            url="/standings",
+            notif_filter="notif_week_results",
+        )
+        logger.info(f"Sent week-results push to {sent} subscriptions")
+    except Exception as ne:
+        logger.warning(f"Week-results push error: {ne}")
+    return True
+
+
 async def sync_scores():
-    """Fetch live scores from ESPN and update the database."""
+    """Fetch live scores from ESPN and update every week still in play."""
     db = SessionLocal()
     try:
-        season, week = get_active_week(db)
-        if not week or not week.espn_week:
-            return
-        if season.year == 9999:  # skip test season
+        season = db.query(Season).filter(Season.is_active == True).first()  # noqa: E712
+        if not season or season.year == 9999:  # no season, or the test season
             return
 
-        logger.info(f"Syncing scores for season {season.year} week {week.week_number}")
-        game_data = await espn.fetch_live_scores(season.year, week.espn_week)
-
-        for gd in game_data:
-            game = db.query(Game).filter(Game.espn_game_id == gd["espn_game_id"]).first()
-            if not game:
+        for week in get_syncable_weeks(db, season):
+            logger.info(f"Syncing scores for season {season.year} week {week.week_number}")
+            try:
+                game_data = await espn.fetch_live_scores(season.year, week.espn_week)
+            except Exception as fe:
+                logger.warning(f"Score fetch failed for week {week.week_number}: {fe}")
                 continue
 
-            was_final = game.is_final
-            game.home_score = gd["home_score"]
-            game.away_score = gd["away_score"]
-            game.is_final = gd["is_final"]
-            game.is_in_progress = gd["is_in_progress"]
-            game.quarter = gd["quarter"]
-            game.time_remaining = gd["time_remaining"]
+            for gd in game_data:
+                game = db.query(Game).filter(Game.espn_game_id == gd["espn_game_id"]).first()
+                if not game or game.week_id != week.id:
+                    continue
+                apply_feed_scores(db, game, gd)
 
-            if gd["is_final"] and not was_final:
-                scoring.update_game_results(db, game)
-            else:
-                db.commit()
-
-        # Check if all games in the week are final
-        all_games = db.query(Game).filter(Game.week_id == week.id).all()
-        if all_games and all(g.is_final for g in all_games):
-            week.is_completed = True
-            db.commit()
-            logger.info(f"Week {week.week_number} is now completed")
-            # Fire week-results push notifications
-            try:
-                from app.services.notifications import send_to_all
-                sent = send_to_all(
-                    title="Week Results Are In!",
-                    body=f"Week {week.week_number} is complete — check the standings.",
-                    url="/standings",
-                    notif_filter="notif_week_results",
-                )
-                logger.info(f"Sent week-results push to {sent} subscriptions")
-            except Exception as ne:
-                logger.warning(f"Week-results push error: {ne}")
+            complete_week_if_done(db, week)
 
     except Exception as e:
         logger.error(f"Score sync error: {e}")
