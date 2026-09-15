@@ -9,6 +9,9 @@
 6. [How Scoring Works](#6-how-scoring-works)
 7. [Contributor Guide — Spreads & Scores](#7-contributor-guide--spreads--scores)
 8. [Admin Guide — Managing the League](#8-admin-guide--managing-the-league)
+9. [Money — Prize Payouts & League Funds](#9-money--prize-payouts--league-funds)
+10. [Submitting an Issue](#10-submitting-an-issue)
+11. [Configuration — Environment Variables](#11-configuration--environment-variables)
 
 ---
 
@@ -47,7 +50,7 @@ There are three roles in NAL:
 |---|---|
 | **Player** | Enter picks, view dashboard, standings, and profiles |
 | **Contributor** | Everything a Player can do, plus manage spreads and scores |
-| **Admin** | Everything a Contributor can do, plus manage seasons, weeks, and users |
+| **Admin** | Everything a Contributor can do, plus manage seasons, weeks, users, and the league's money |
 
 Admins can change any user's role from the **Manage Users** page.
 
@@ -282,7 +285,71 @@ The bottom of the admin panel shows the last 20 actions taken by admins and cont
 
 ---
 
-## 9. Submitting an Issue
+## 9. Money — Prize Payouts & League Funds
+
+Two admin-only pages work together. **Prize Payouts** (`/admin/payouts`) decides how the
+season's pool is divided up. **League Funds** (`/admin/funds`) tracks the money actually
+moving — entry fees in, prizes out — and tells you who is still waiting to be paid.
+
+### Prize Payouts (`/admin/payouts`)
+
+Enter the **Total Pool** (e.g. `$1,000`) and how many **Weeks Paid** the weekly prizes run
+for (18 by default), then fill in three sets of amounts:
+
+| Section | When it pays | Notes |
+|---|---|---|
+| **Weekly Prizes** | Every week, as soon as that week's last game goes final | Set an amount per place — 1st `$15`, 2nd `$10`, 3rd `$5` |
+| **Season End Prizes** | Once, on the final season standings | e.g. top 4 |
+| **Award Prizes** | Once, to whoever leads each award at season's end | One prize per award |
+
+The dark bar at the top keeps a running total as you type: what the plan commits, what is
+left of the pool, and whether you have gone over. It turns green on **Fully allocated ✓**
+when the pool is spent to the cent.
+
+Two buttons:
+
+- **Preview Without Saving** — prices the numbers you have typed against the season's real
+  results. This is the playground: try `$15/$10/$5` weekly against `$20/$10` and see what
+  each would have paid out so far before committing to either.
+- **Save Plan** — stores it.
+
+> **Changes are backdated, always.** No payout is ever frozen in place — every amount on
+> both pages is worked out from the current plan against the standings each time the page
+> loads. Decide in week 6 that first place is worth `$15` rather than `$10`, and the player
+> who won week 1 is owed `$15`. There is nothing to go back and re-enter.
+
+**Ties split the places they span.** Two players tied for first share the 1st and 2nd
+prizes at `$12.50` each, and third place still collects 3rd. The pool pays out the same
+total however the week finishes, down to the cent.
+
+Season end and award money stays a **projection** until the season is over — it is shown
+so you can see where things are heading, but it is not counted as owed. An award nobody
+has scored on (Bottom Feeder, before eliminations start) pays nothing.
+
+### League Funds (`/admin/funds`)
+
+**Settings** holds the entry fee and your payment handles (Venmo, PayPal, Cash App, Zelle).
+
+**Payouts To Make** is the one to check each week. It lists every player with what they
+have **earned** under the prize plan, what you have **paid** them, and what is still
+**owed** — plus a *What For* column breaking the total down by week and place. The red
+banner at the top is the short version: "3 players are waiting on a total of $30.00".
+
+- **Log $15.00** next to a player records that payment in one click.
+- **Log all 3 payouts** does the whole round at once.
+
+Both only write the payment down — the money still leaves by Venmo or by hand.
+
+**Weekly Prize Winners** lists each finished week's winners and amounts, most recent
+first, so you can see at a glance who to pay this week.
+
+**Player Status** covers the other direction — who has paid their entry fee — and the
+**Transaction Log** is every movement in and out, with a Delete on each row if you log
+something by mistake.
+
+---
+
+## 10. Submitting an Issue
 
 Any logged-in user can report a bug or suggestion from the **Submit an Issue** page
 (`/feedback`), linked in the top navigation and the page footer. Enter a short title and
@@ -310,7 +377,7 @@ that reporting isn't available.
 
 ---
 
-## 10. Configuration — Environment Variables
+## 11. Configuration — Environment Variables
 
 App configuration lives in a `.env` file next to `docker-compose.yml` on the host.
 Copy `.env.example` to `.env` (`cp .env.example .env`) and fill it in. After changing
@@ -337,6 +404,11 @@ Every merge to `main` publishes a ready-built image to the GitHub Container
 Registry (`ghcr.io/jeffreyrdubois/nationalarmchairleague:latest`), for both
 amd64 and arm64. Updating pulls that image — there is nothing to compile on the
 server, so an update takes seconds rather than minutes.
+
+**From the app itself** — Admin Panel → **Update the App** (`/admin/update`).
+Pick a version, type its tag to confirm, and the app pulls the image and
+restarts itself. Needs the Docker socket mapped in once; see
+[Updating from inside the app](#updating-from-inside-the-app) below.
 
 **On Unraid**, the container shows up in the Docker tab with an **update ready**
 flag once a new image is published. Click **Apply** and you are done.
@@ -375,6 +447,82 @@ A version ending in `-dev` means the running image was built by hand rather than
 published by CI — useful for telling "the update did not apply" apart from "the
 update applied and did not fix it".
 
+A version like `1.0.0-my-branch+a1b2c3d` is a branch build published by hand
+(see below) — it is not on `main`.
+
+### Updating from inside the app
+
+The **Update the App** page (`/admin/update`, admins only) does what the Unraid
+Docker tab does, from anywhere you can reach the league. It shows what is
+running, lists every version in the registry, and installs the one you pick.
+
+**Turning it on.** A container can only replace itself if it can talk to
+Docker, so the socket has to be mapped in — once:
+
+- **Unraid** → Docker → NAL → Edit → *Show more settings* → the
+  **Docker Socket** path → set it to `/var/run/docker.sock` → Apply.
+- **Compose** → uncomment the `/var/run/docker.sock` line in
+  `docker-compose.yml` and `docker compose up -d`.
+
+Until then the page still loads and tells you exactly what to add; nothing else
+changes and `./update.sh` keeps working.
+
+> **Know the trade.** Anything that can reach the Docker socket can control
+> Docker on the host, which is as good as root there. Only admins can reach the
+> update page, the image it pulls is fixed in the app's code (you choose a
+> version, never an image name), and you have to type the tag to confirm — but a
+> bug anywhere in the app is a more serious bug with the socket mapped. If that
+> is not a trade you want, leave it off and keep using Unraid or `./update.sh`.
+
+**What happens when you install.** The app pulls the image, then hands the swap
+to a throwaway helper container built from the version *currently* running —
+so the code responsible for undoing a bad build never comes from that build.
+The helper stops the app, parks it under another name, starts the replacement,
+and waits for it to report healthy. **If it doesn't come up, the old container
+is put straight back** and the page says so. Your database and settings live on
+the data volume, not in the image, so nothing is lost either way.
+
+The page follows along while this happens. It will go unreachable for a few
+seconds mid-swap — that is the container restarting, and it reconnects on its
+own.
+
+**Choosing a version.** The list is read from the registry and grouped:
+
+| Group | What it is |
+|---|---|
+| **Current Release** | `latest` — the newest build of `main`. The normal choice. |
+| **Tagged Releases** | Numbered versions, if any have been tagged. |
+| **Branch Builds** | Work that isn't merged yet, published by hand (below). |
+| **Individual Commits** | `sha-…`, every build of `main`. **This is how you go back** if an update turns out wrong. |
+
+**Trying a branch before you merge it.** Pull requests are built and tested by
+CI but deliberately *not* published — every push to every branch would be
+another multi-arch build and another image in the registry, for branches most of
+which are never installed. So a branch build is published only when you ask for
+one:
+
+1. Go to the repository's **Actions** tab → **Publish Docker Image** →
+   **Run workflow**.
+2. Pick the pull request's branch from the branch dropdown.
+3. In the **tag** box, type `pr-` and the pull request's number (e.g. `pr-54`).
+   Then it appears on the update page named after that pull request rather than
+   as a bare commit hash. Leave it blank and it publishes as `sha-…` only.
+4. When the build finishes, hit **Refresh list** on the update page and install
+   it.
+
+That publishes exactly one image and leaves `latest` alone, so nothing else is
+affected until you install it. To go back afterwards, install `latest` again.
+
+**If something is wrong:**
+
+| What the page says | What to do |
+|---|---|
+| *is not present in the container* | The socket isn't mapped. See *Turning it on* above. |
+| *cannot open it — the app user is not in the socket's group* | Restart the container; the entrypoint sets this up at boot. |
+| *Docker has no container called '…'* | Put the real container name (usually `nal`) in **Updater Settings** on the same page. |
+| *The registry refused the request* | Only for a private package — save a GitHub token with `read:packages` in **Updater Settings**. |
+| *The previous version has been restored* | The new build didn't come up. You are back on the old one; nothing to do. |
+
 ---
 
 ## Quick Reference
@@ -389,5 +537,8 @@ update applied and did not fix it".
 | Spreads | `/admin/spreads` | Contributor+ |
 | Scores | `/admin/scores` | Contributor+ |
 | Admin Panel | `/admin/` | Admin |
+| Prize Payouts | `/admin/payouts` | Admin |
+| League Funds | `/admin/funds` | Admin |
+| Update the App | `/admin/update` | Admin |
 | Week Admin | `/admin/week/{id}` | Admin |
 | Users | `/admin/users` | Admin |

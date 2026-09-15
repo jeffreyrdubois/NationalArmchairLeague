@@ -318,3 +318,53 @@ class Transaction(Base):
 
     user = relationship("User", foreign_keys=[user_id])
     logged_by = relationship("User", foreign_keys=[logged_by_id])
+
+
+class PayoutPlan(Base):
+    """A season's prize structure — the pool and how much each place is worth.
+
+    Nothing about a payout is ever snapshotted. Every dollar the league owes is
+    recomputed from this plan against the standings as they stand right now,
+    which is what lets a mid-season change reach backwards: raise first place
+    from $10 to $15 and last week's winner is owed $15, with nothing to re-key.
+    """
+    __tablename__ = "payout_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    season_id = Column(Integer, ForeignKey("seasons.id"), unique=True, nullable=False)
+    pool_amount = Column(Float, default=0.0, nullable=False)
+    # Weekly prizes are paid for weeks 1..paid_weeks, and the pool math budgets
+    # for exactly that many weeks.
+    paid_weeks = Column(Integer, default=18, nullable=False)
+    notes = Column(Text)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    updated_by_id = Column(Integer, ForeignKey("users.id"))
+
+    season = relationship("Season")
+    updated_by = relationship("User")
+    rules = relationship(
+        "PayoutRule", back_populates="plan", cascade="all, delete-orphan"
+    )
+
+
+class PayoutRule(Base):
+    """One line of a plan: what a given place (or award) pays.
+
+    ``category`` is ``weekly`` (paid every week), ``season`` (paid once on the
+    final season standings) or ``award`` — in which case ``award_id`` names the
+    award from ``app.services.awards.AWARD_REGISTRY``. ``award_id`` is an empty
+    string rather than NULL for the other two so the unique constraint actually
+    bites (SQLite treats NULLs as distinct).
+    """
+    __tablename__ = "payout_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(Integer, ForeignKey("payout_plans.id"), nullable=False)
+    category = Column(String(10), nullable=False)
+    rank = Column(Integer, nullable=False, default=1)
+    award_id = Column(String(50), nullable=False, default="")
+    amount = Column(Float, nullable=False, default=0.0)
+
+    __table_args__ = (UniqueConstraint("plan_id", "category", "award_id", "rank"),)
+
+    plan = relationship("PayoutPlan", back_populates="rules")

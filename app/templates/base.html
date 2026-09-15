@@ -41,11 +41,13 @@
           {% if user.role in ('contributor', 'admin') %}
           <div class="relative group">
             <button class="text-sm hover:text-yellow-300 transition">Manage ▾</button>
-            <div class="absolute left-0 top-full hidden group-hover:block bg-gray-800 rounded shadow-lg py-1 z-50 w-40">
+            <div class="absolute left-0 top-full hidden group-hover:block bg-gray-800 rounded shadow-lg py-1 z-50 w-48">
               <a href="/admin/spreads" class="block px-4 py-2 text-sm hover:bg-gray-700">Spreads</a>
               <a href="/admin/scores" class="block px-4 py-2 text-sm hover:bg-gray-700">Scores</a>
               {% if user.role == 'admin' %}
               <a href="/admin/funds" class="block px-4 py-2 text-sm hover:bg-gray-700">League Funds</a>
+              <a href="/admin/payouts" class="block px-4 py-2 text-sm hover:bg-gray-700">Prize Payouts</a>
+              <a href="/admin/update" class="block px-4 py-2 text-sm hover:bg-gray-700">Update the App</a>
               <a href="/admin/" class="block px-4 py-2 text-sm hover:bg-gray-700">Admin Panel</a>
               {% endif %}
             </div>
@@ -100,6 +102,8 @@
           <a href="/admin/scores" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Manage → Scores</a>
           {% if user.role == 'admin' %}
           <a href="/admin/funds" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Manage → League Funds</a>
+          <a href="/admin/payouts" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Manage → Prize Payouts</a>
+          <a href="/admin/update" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Manage → Update the App</a>
           <a href="/admin/" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Admin Panel</a>
           {% endif %}
           {% endif %}
@@ -164,7 +168,12 @@
     {% if user %}
     &middot; <a href="/feedback" class="underline hover:text-gray-600">Submit an Issue</a>
     {% endif %}
-    &middot; <span title="Running version">v{{ app_version }}</span>
+    &middot;
+    {% if user and user.role == 'admin' %}
+    <a href="/admin/update" class="underline hover:text-gray-600" title="Running version — click to update">v{{ app_version }}</a>
+    {% else %}
+    <span title="Running version">v{{ app_version }}</span>
+    {% endif %}
   </footer>
 
   {% if user %}

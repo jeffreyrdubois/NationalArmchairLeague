@@ -14,6 +14,7 @@ PUID="${PUID:-99}"
 PGID="${PGID:-100}"
 UMASK="${UMASK:-022}"
 DATA_DIR="${DATA_DIR:-/app/data}"
+DOCKER_SOCKET="${DOCKER_SOCKET:-/var/run/docker.sock}"
 APP_USER="nal"
 
 log() { printf '[entrypoint] %s\n' "$1"; }
@@ -93,8 +94,47 @@ fi
 # rather than the volume, so it needs to be writable by the same user.
 chown -R "${PUID}:${PGID}" /app/app/static 2>/dev/null || true
 
+# --- Docker socket, for updating the app from the admin page ---------------
+#
+# Optional: if the socket has not been mapped in, the update page says so and
+# nothing here happens. When it has, the app still cannot use it — the socket
+# belongs to root (or to a `docker` group) and the app runs as 99:100, so every
+# call would come back "permission denied" with nothing to suggest the cause.
+#
+# So the socket's own group is read off the mount and added to the app user as
+# a supplementary group. Ownership on the data volume is unaffected: the primary
+# group is still PGID, so files are created exactly as before.
+USE_USERNAME=""
+if [ -S "$DOCKER_SOCKET" ]; then
+  sock_gid="$(stat -c '%g' "$DOCKER_SOCKET" 2>/dev/null || echo '')"
+  if [ -z "$sock_gid" ]; then
+    log "WARNING: $DOCKER_SOCKET is mounted but unreadable; in-app updates will be off"
+  elif [ "$sock_gid" = "$PGID" ]; then
+    log "$DOCKER_SOCKET is already reachable as group $PGID"
+  else
+    sock_group="$(getent group "$sock_gid" 2>/dev/null | cut -d: -f1)"
+    if [ -z "$sock_group" ]; then
+      sock_group="dockersock"
+      groupadd -g "$sock_gid" "$sock_group" 2>/dev/null || true
+    fi
+    if usermod -aG "$sock_group" "$APP_USER" 2>/dev/null; then
+      # gosu only keeps supplementary groups when it is given a user *name*;
+      # "uid:gid" sets exactly that one group and drops the rest, which would
+      # throw away the access just granted.
+      USE_USERNAME="$APP_USER"
+      log "added $APP_USER to group $sock_group (gid $sock_gid) for Docker socket access"
+    else
+      log "WARNING: could not grant $APP_USER access to $DOCKER_SOCKET"
+    fi
+  fi
+fi
+
 umask "$UMASK"
 log "starting as ${PUID}:${PGID}"
+
+if [ -n "$USE_USERNAME" ]; then
+  exec gosu "$USE_USERNAME" "$@"
+fi
 
 # exec, so uvicorn receives SIGTERM directly — that is what lets it finish
 # in-flight requests and close the database inside Docker's 10s stop window.

@@ -9,7 +9,20 @@ on:
   # already merged — and the first thing it would break is the update path
   # itself, which is the worst thing to have to fix by hand on the server.
   pull_request:
+  # Publishing a branch on demand. Pull requests deliberately do not publish —
+  # every PR push would be a multi-arch build and another image sitting in the
+  # registry, for branches most of which are never installed. Instead: when a
+  # branch is actually worth trying on the real league, run this workflow from
+  # the Actions tab with that branch selected, and it publishes exactly one
+  # image. The in-app updater lists it like any other version.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Optional name for this build's image tag (e.g. "test" or "pr-54").
+          Leave blank to publish only as sha-<commit>.
+        required: false
+        type: string
 
 # Merging three pull requests in a row would otherwise cost three publishes, and
 # the first two publish an image nobody will ever pull: `latest` only ever means
@@ -43,12 +56,22 @@ jobs:
       # the VERSION file plus the commit it was built from.
       - id: build-info
         name: Work out the version and build time
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
+          base="$(tr -d '[:space:]' < VERSION)"
+          commit="$(git rev-parse --short HEAD)"
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             version="${GITHUB_REF_NAME#v}"
+          elif [ "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH" ]; then
+            version="${base}+${commit}"
           else
-            version="$(tr -d '[:space:]' < VERSION)+$(git rev-parse --short HEAD)"
+            # A hand-published branch: 1.0.0-claude-my-branch+a1b2c3d, so the
+            # footer of a test install says what it is running rather than
+            # looking like an ordinary build of main.
+            slug="$(printf '%s' "$GITHUB_REF_NAME" | tr -c 'A-Za-z0-9' '-' | sed 's/-\+/-/g; s/^-//; s/-$//')"
+            version="${base}-${slug}+${commit}"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "built-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
@@ -70,6 +93,9 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
+            # The optional name given when publishing a branch by hand, so a
+            # test build can be installed as "pr-54" rather than a commit hash.
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
             type=sha,format=short
 
       # Built for the host architecture first and actually started, so a broken
@@ -121,6 +147,74 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/)" = "303"
           docker logs smoke
           docker rm -f smoke
+
+      # In-app updating is the one feature whose hard part is host plumbing:
+      # the socket is root-owned, the app runs as 99:100, and gosu drops
+      # supplementary groups unless it is handed a user *name*. Get any of that
+      # wrong and every Docker call comes back "permission denied" — on the
+      # server, after a release. Unit tests cannot see any of it, so it is
+      # exercised here against the runner's own daemon.
+      - name: Smoke test the in-app updater
+        run: |
+          set -euo pipefail
+          cat > /tmp/updater_check.py <<'PY'
+          import json
+          from app.services import docker_api, selfupdate
+
+          status = docker_api.socket_status()
+          print("socket:", status)
+          assert status["ok"], status
+
+          client = docker_api.DockerClient()
+          container = client.inspect_container("smoke-updater")
+          image = client.inspect_image(container["Image"])
+
+          spec = selfupdate.build_container_spec(container, image, "example/new:tag")
+          print(json.dumps(spec, indent=2)[:2000])
+
+          # The bug that would make the update page lie about whether it worked:
+          # APP_VERSION is baked into the image, so carrying the old container's
+          # copy forward would have the new build report the old version.
+          env = spec.get("Env", [])
+          assert not any(e.startswith("APP_VERSION=") for e in env), env
+          # Settings the operator passed in have to survive.
+          assert "SMOKE_KEPT=yes" in env, env
+          assert spec["Image"] == "example/new:tag", spec["Image"]
+          # And the entrypoint must come from the new image, not be pinned here.
+          assert "Entrypoint" not in spec, spec.get("Entrypoint")
+          print("updater checks passed")
+          PY
+
+          docker run -d --name smoke-updater \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -e SMOKE_KEPT=yes \
+            -e UPDATE_CONTAINER_NAME=smoke-updater \
+            nal:smoke
+          for i in $(seq 1 30); do
+            if docker exec smoke-updater python /app/healthcheck.py >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          docker logs smoke-updater
+
+          # The entrypoint has to have put the app user in the socket's group.
+          docker exec smoke-updater id nal
+          # The data volume must still be owned exactly as before — the socket
+          # group is supplementary, it must not become the primary one.
+          test "$(docker exec smoke-updater stat -c '%u:%g' /app/data/nal.db)" = "99:100"
+
+          docker cp /tmp/updater_check.py smoke-updater:/tmp/updater_check.py
+          # As `nal`, not as root and not as 99:100 — the username form is the
+          # only one that carries the supplementary group, and it is what the
+          # entrypoint uses to launch the app.
+          #
+          # PYTHONPATH rather than -w: Python puts the *script's* directory on
+          # sys.path, not the working directory, so /app has to be named.
+          docker exec -u nal -e PYTHONPATH=/app smoke-updater \
+            python /tmp/updater_check.py
+
+          docker rm -f smoke-updater
 
       - name: Build and push
         if: github.event_name != 'pull_request'

@@ -134,4 +134,15 @@ No required configuration. Click Apply, open the WebUI, register the first accou
     Display="advanced"
     Required="false"
     Mask="false">100</Config>
+
+  <Config
+    Name="Docker Socket (optional — enables in-app updates)"
+    Target="/var/run/docker.sock"
+    Default=""
+    Mode="rw"
+    Description="Leave empty unless you want to update the app from its own admin page (Manage -&gt; Update the App) instead of coming back here. With this mapped, the app can pull a new image and restart itself, and put the old one back if the new one does not come up. [b]Understand the trade first:[/b] anything that can reach this socket can control Docker on this server, which is as good as root on it. Only admins can reach the update page and the image it pulls is fixed in the app's code, but a bug anywhere in the app becomes a much more serious one with this mapped. To enable, set this to /var/run/docker.sock."
+    Type="Path"
+    Display="advanced"
+    Required="false"
+    Mask="false"/>
 </Container>

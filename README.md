@@ -29,6 +29,13 @@ and to update:
 
     ./update.sh
 
+**Or from the app itself** — Admin Panel -> **Update the App**. Pick a version
+(including an older commit, to go back), confirm, and the app pulls the image
+and restarts itself, putting the old container back if the new one does not come
+up. It needs the Docker socket mapped in once, which is a real trade-off worth
+reading about first: see
+[Updating from inside the app](MANUAL.md#updating-from-inside-the-app).
+
 ## What is running
 
 `/health` reports the running build without needing a login, and the same

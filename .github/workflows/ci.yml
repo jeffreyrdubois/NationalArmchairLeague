@@ -76,3 +76,21 @@ jobs:
       # line that the whole side-by-side comparison rests on.
       - name: Test the all-picks grid layout
         run: python tests/test_pick_matrix_layout.py
+
+      # Payout amounts are never snapshotted — the plan is priced against the
+      # standings on every page load, which is what lets a mid-season change
+      # reach back and repay a week already played. That, the pool arithmetic
+      # the playground warns on, and a tied podium splitting its places are the
+      # three things nobody would notice were wrong until money changed hands.
+      - name: Test prize payouts and the playground
+        run: python tests/test_payouts.py
+
+      # Updating the app from inside the app is the one feature that, done
+      # wrong, takes the league offline with no way back in except the VPN trip
+      # it exists to avoid. These run a stand-in Docker daemon on a real unix
+      # socket and assert what actually gets sent to it: that the replacement
+      # container keeps the operator's settings without inheriting the old
+      # image's version stamp, that a build which never comes up is rolled
+      # back, and that a tag from a form can never become an image name.
+      - name: Test the in-app updater
+        run: python tests/test_selfupdate.py

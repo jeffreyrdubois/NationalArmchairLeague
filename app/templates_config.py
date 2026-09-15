@@ -2,7 +2,7 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 import os
 
-from app.utils import to_eastern
+from app.utils import ordinal, to_eastern
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["enumerate"] = enumerate
@@ -11,6 +11,8 @@ templates.env.filters["enumerate"] = enumerate
 # Pipe a datetime through `| eastern` before strftime to render the correct ET
 # wall-clock time (e.g. {{ (game.kickoff_time | eastern).strftime('...') }}).
 templates.env.filters["eastern"] = to_eastern
+# Finishing places read as "1st"/"2nd" wherever prizes are listed.
+templates.env.filters["ordinal"] = ordinal
 
 # Build identity, shown in the footer of every page. After an Unraid update the
 # first question is whether the new image actually took; putting the answer on
