@@ -2,9 +2,12 @@
 {% block title %}League Funds &mdash; NAL{% endblock %}
 {% block content %}
 
-<div class="flex items-center justify-between mb-6">
+<div class="flex flex-wrap items-center justify-between gap-3 mb-6">
   <h1 class="text-2xl font-bold">League Funds</h1>
-  <a href="/admin/" class="text-sm text-blue-600 hover:underline">&larr; Admin Panel</a>
+  <div class="flex items-center gap-4 text-sm">
+    <a href="/admin/payouts" class="text-blue-600 hover:underline">Prize Payouts &rarr;</a>
+    <a href="/admin/" class="text-sm text-blue-600 hover:underline">&larr; Admin Panel</a>
+  </div>
 </div>
 
 {% if msg %}
@@ -54,7 +57,7 @@
 </div>
 
 <!-- ── Summary ── -->
-<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
   <div class="bg-white rounded-xl shadow p-4 text-center">
     <div class="text-2xl font-bold">${{ "%.2f" | format(total_pool) }}</div>
     <div class="text-xs text-gray-500 mt-1">Total Pool</div>
@@ -73,7 +76,170 @@
     <div class="text-2xl font-bold text-blue-600">${{ "%.2f" | format(total_paid_out) }}</div>
     <div class="text-xs text-gray-500 mt-1">Paid Out</div>
   </div>
+  <div class="bg-white rounded-xl shadow p-4 text-center">
+    <div class="text-2xl font-bold">${{ "%.2f" | format(report.earned_total) }}</div>
+    <div class="text-xs text-gray-500 mt-1">Prizes Earned</div>
+  </div>
+  <div class="bg-white rounded-xl shadow p-4 text-center">
+    <div class="text-2xl font-bold {% if total_owed > 0 %}text-red-600{% else %}text-gray-400{% endif %}">
+      ${{ "%.2f" | format(total_owed) }}
+    </div>
+    <div class="text-xs text-gray-500 mt-1">Still To Pay</div>
+  </div>
 </div>
+
+<!-- ── Payouts To Make ── -->
+<div class="bg-white rounded-xl shadow p-5 mb-8" id="payouts">
+  <div class="flex flex-wrap items-start justify-between gap-3 mb-1">
+    <h2 class="font-semibold text-lg">Payouts To Make</h2>
+    <a href="/admin/payouts" class="text-xs text-blue-600 hover:underline">Edit the prize plan &rarr;</a>
+  </div>
+
+  {% if not plan.is_configured %}
+  <p class="text-sm text-gray-500">
+    No prize plan is set for {% if season %}{{ season.year }}{% else %}the active season{% endif %} yet.
+    <a href="/admin/payouts" class="text-blue-600 underline">Set the payout amounts</a>
+    and this fills in with who is owed what.
+  </p>
+  {% else %}
+  <p class="text-xs text-gray-500 mb-4">
+    What each player has earned under the {{ season.year }} prize plan, against what you
+    have logged paying them. Anything in the red column is still owed.
+    {% if not report.season_complete %}
+    Season end and award money is not counted here until the season finishes.
+    {% endif %}
+  </p>
+
+  {% set owed_rows = ledger | selectattr("owed", "greaterthan", 0) | list %}
+  {% if owed_rows %}
+  <div class="bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-4 flex flex-wrap items-center justify-between gap-3">
+    <div class="text-sm text-red-800">
+      <b>{{ owed_rows | length }}</b> {% if owed_rows | length == 1 %}player is{% else %}players are{% endif %}
+      waiting on a total of <b>${{ "%.2f" | format(total_owed) }}</b>.
+    </div>
+    <form method="post" action="/admin/funds/payouts/settle"
+      onsubmit="return confirm('Log a payout for all {{ owed_rows | length }} players, totalling ${{ "%.2f" | format(total_owed) }}? This records the payments — it does not send any money.')">
+      <button class="bg-gray-900 text-white text-xs font-semibold px-3 py-2 rounded hover:bg-gray-700">
+        Log all {{ owed_rows | length }} payouts
+      </button>
+    </form>
+  </div>
+  {% else %}
+  <div class="bg-green-50 border border-green-200 rounded-lg px-4 py-3 mb-4 text-sm text-green-800">
+    Everybody is square &mdash; nothing is owed right now.
+  </div>
+  {% endif %}
+
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+        <tr>
+          <th class="text-left px-3 py-2">Player</th>
+          <th class="text-right px-3 py-2">Earned</th>
+          <th class="text-right px-3 py-2">Paid</th>
+          <th class="text-right px-3 py-2">Owed</th>
+          <th class="text-left px-3 py-2 hidden md:table-cell">What For</th>
+          <th class="text-center px-3 py-2">Pay</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in ledger %}
+        {% if row.earned or row.paid %}
+        <tr class="border-t hover:bg-gray-50 align-top">
+          <td class="px-3 py-2.5 font-medium whitespace-nowrap">
+            {{ row.user.full_name }}
+            {% if not row.user.is_active %}<span class="text-xs text-gray-400">(disabled)</span>{% endif %}
+          </td>
+          <td class="px-3 py-2.5 text-right whitespace-nowrap">
+            ${{ "%.2f" | format(row.earned) }}
+            {% if row.projected %}
+            <span class="block text-xs text-gray-400">+${{ "%.2f" | format(row.projected) }} projected</span>
+            {% endif %}
+          </td>
+          <td class="px-3 py-2.5 text-right text-blue-600 whitespace-nowrap">${{ "%.2f" | format(row.paid) }}</td>
+          <td class="px-3 py-2.5 text-right font-bold whitespace-nowrap
+            {% if row.owed > 0 %}text-red-600{% elif row.owed < 0 %}text-amber-600{% else %}text-gray-400{% endif %}">
+            {% if row.owed > 0 %}${{ "%.2f" | format(row.owed) }}
+            {% elif row.owed < 0 %}&minus;${{ "%.2f" | format(-row.owed) }}
+            {% else %}Square &#10003;{% endif %}
+          </td>
+          <td class="px-3 py-2.5 hidden md:table-cell">
+            <div class="flex flex-wrap gap-1">
+              {% for line in row.lines if line.earned %}
+              <span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded whitespace-nowrap">
+                {{ line.label }} {{ line.place }} ${{ "%.2f" | format(line.amount) }}
+              </span>
+              {% else %}
+              <span class="text-xs text-gray-400">Nothing earned yet</span>
+              {% endfor %}
+            </div>
+          </td>
+          <td class="px-3 py-2.5 text-center">
+            {% if row.owed > 0 %}
+            <form method="post" action="/admin/funds/transaction">
+              <input type="hidden" name="user_id" value="{{ row.user.id }}" />
+              <input type="hidden" name="amount" value="{{ "%.2f" | format(row.owed) }}" />
+              <input type="hidden" name="direction" value="out" />
+              <input type="hidden" name="note" value="Prize payout{% if season %} ({{ season.year }}){% endif %}" />
+              <button class="text-xs bg-gray-900 text-white px-2.5 py-1 rounded hover:bg-gray-700 whitespace-nowrap">
+                Log ${{ "%.2f" | format(row.owed) }}
+              </button>
+            </form>
+            {% else %}
+            <span class="text-xs text-gray-300">&mdash;</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ── Week by week prizes ── -->
+{% if payout_weeks %}
+<div class="bg-white rounded-xl shadow p-5 mb-8">
+  <h2 class="font-semibold text-lg mb-1">Weekly Prize Winners</h2>
+  <p class="text-xs text-gray-500 mb-4">
+    Most recent week first. These update if you change the weekly amounts on the
+    prize plan &mdash; past weeks included.
+  </p>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+        <tr>
+          <th class="text-left px-3 py-2">Week</th>
+          <th class="text-left px-3 py-2">Winners</th>
+          <th class="text-right px-3 py-2">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for wk in payout_weeks %}
+        <tr class="border-t align-top">
+          <td class="px-3 py-2.5 font-medium whitespace-nowrap">Week {{ wk.week.week_number }}</td>
+          <td class="px-3 py-2.5">
+            <div class="flex flex-wrap gap-x-4 gap-y-1">
+              {% for line in wk.lines %}
+              <span class="whitespace-nowrap">
+                <span class="text-gray-400">{{ line.place }}</span>
+                {{ line.user.full_name }}
+                <b class="text-green-700">${{ "%.2f" | format(line.amount) }}</b>
+              </span>
+              {% else %}
+              <span class="text-gray-400">No picks that week</span>
+              {% endfor %}
+            </div>
+          </td>
+          <td class="px-3 py-2.5 text-right font-semibold whitespace-nowrap">${{ "%.2f" | format(wk.total) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
 
 <!-- ── Player Status ── -->
 <div class="bg-white rounded-xl shadow p-5 mb-8">

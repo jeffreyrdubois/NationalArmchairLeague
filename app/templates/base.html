@@ -46,6 +46,7 @@
               <a href="/admin/scores" class="block px-4 py-2 text-sm hover:bg-gray-700">Scores</a>
               {% if user.role == 'admin' %}
               <a href="/admin/funds" class="block px-4 py-2 text-sm hover:bg-gray-700">League Funds</a>
+              <a href="/admin/payouts" class="block px-4 py-2 text-sm hover:bg-gray-700">Prize Payouts</a>
               <a href="/admin/" class="block px-4 py-2 text-sm hover:bg-gray-700">Admin Panel</a>
               {% endif %}
             </div>
@@ -100,6 +101,7 @@
           <a href="/admin/scores" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Manage → Scores</a>
           {% if user.role == 'admin' %}
           <a href="/admin/funds" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Manage → League Funds</a>
+          <a href="/admin/payouts" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Manage → Prize Payouts</a>
           <a href="/admin/" class="px-2 py-2.5 text-sm rounded hover:bg-gray-800 hover:text-yellow-300">Admin Panel</a>
           {% endif %}
           {% endif %}

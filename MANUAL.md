@@ -9,6 +9,9 @@
 6. [How Scoring Works](#6-how-scoring-works)
 7. [Contributor Guide — Spreads & Scores](#7-contributor-guide--spreads--scores)
 8. [Admin Guide — Managing the League](#8-admin-guide--managing-the-league)
+9. [Money — Prize Payouts & League Funds](#9-money--prize-payouts--league-funds)
+10. [Submitting an Issue](#10-submitting-an-issue)
+11. [Configuration — Environment Variables](#11-configuration--environment-variables)
 
 ---
 
@@ -47,7 +50,7 @@ There are three roles in NAL:
 |---|---|
 | **Player** | Enter picks, view dashboard, standings, and profiles |
 | **Contributor** | Everything a Player can do, plus manage spreads and scores |
-| **Admin** | Everything a Contributor can do, plus manage seasons, weeks, and users |
+| **Admin** | Everything a Contributor can do, plus manage seasons, weeks, users, and the league's money |
 
 Admins can change any user's role from the **Manage Users** page.
 
@@ -282,7 +285,71 @@ The bottom of the admin panel shows the last 20 actions taken by admins and cont
 
 ---
 
-## 9. Submitting an Issue
+## 9. Money — Prize Payouts & League Funds
+
+Two admin-only pages work together. **Prize Payouts** (`/admin/payouts`) decides how the
+season's pool is divided up. **League Funds** (`/admin/funds`) tracks the money actually
+moving — entry fees in, prizes out — and tells you who is still waiting to be paid.
+
+### Prize Payouts (`/admin/payouts`)
+
+Enter the **Total Pool** (e.g. `$1,000`) and how many **Weeks Paid** the weekly prizes run
+for (18 by default), then fill in three sets of amounts:
+
+| Section | When it pays | Notes |
+|---|---|---|
+| **Weekly Prizes** | Every week, as soon as that week's last game goes final | Set an amount per place — 1st `$15`, 2nd `$10`, 3rd `$5` |
+| **Season End Prizes** | Once, on the final season standings | e.g. top 4 |
+| **Award Prizes** | Once, to whoever leads each award at season's end | One prize per award |
+
+The dark bar at the top keeps a running total as you type: what the plan commits, what is
+left of the pool, and whether you have gone over. It turns green on **Fully allocated ✓**
+when the pool is spent to the cent.
+
+Two buttons:
+
+- **Preview Without Saving** — prices the numbers you have typed against the season's real
+  results. This is the playground: try `$15/$10/$5` weekly against `$20/$10` and see what
+  each would have paid out so far before committing to either.
+- **Save Plan** — stores it.
+
+> **Changes are backdated, always.** No payout is ever frozen in place — every amount on
+> both pages is worked out from the current plan against the standings each time the page
+> loads. Decide in week 6 that first place is worth `$15` rather than `$10`, and the player
+> who won week 1 is owed `$15`. There is nothing to go back and re-enter.
+
+**Ties split the places they span.** Two players tied for first share the 1st and 2nd
+prizes at `$12.50` each, and third place still collects 3rd. The pool pays out the same
+total however the week finishes, down to the cent.
+
+Season end and award money stays a **projection** until the season is over — it is shown
+so you can see where things are heading, but it is not counted as owed. An award nobody
+has scored on (Bottom Feeder, before eliminations start) pays nothing.
+
+### League Funds (`/admin/funds`)
+
+**Settings** holds the entry fee and your payment handles (Venmo, PayPal, Cash App, Zelle).
+
+**Payouts To Make** is the one to check each week. It lists every player with what they
+have **earned** under the prize plan, what you have **paid** them, and what is still
+**owed** — plus a *What For* column breaking the total down by week and place. The red
+banner at the top is the short version: "3 players are waiting on a total of $30.00".
+
+- **Log $15.00** next to a player records that payment in one click.
+- **Log all 3 payouts** does the whole round at once.
+
+Both only write the payment down — the money still leaves by Venmo or by hand.
+
+**Weekly Prize Winners** lists each finished week's winners and amounts, most recent
+first, so you can see at a glance who to pay this week.
+
+**Player Status** covers the other direction — who has paid their entry fee — and the
+**Transaction Log** is every movement in and out, with a Delete on each row if you log
+something by mistake.
+
+---
+
+## 10. Submitting an Issue
 
 Any logged-in user can report a bug or suggestion from the **Submit an Issue** page
 (`/feedback`), linked in the top navigation and the page footer. Enter a short title and
@@ -310,7 +377,7 @@ that reporting isn't available.
 
 ---
 
-## 10. Configuration — Environment Variables
+## 11. Configuration — Environment Variables
 
 App configuration lives in a `.env` file next to `docker-compose.yml` on the host.
 Copy `.env.example` to `.env` (`cp .env.example .env`) and fill it in. After changing
@@ -389,5 +456,7 @@ update applied and did not fix it".
 | Spreads | `/admin/spreads` | Contributor+ |
 | Scores | `/admin/scores` | Contributor+ |
 | Admin Panel | `/admin/` | Admin |
+| Prize Payouts | `/admin/payouts` | Admin |
+| League Funds | `/admin/funds` | Admin |
 | Week Admin | `/admin/week/{id}` | Admin |
 | Users | `/admin/users` | Admin |

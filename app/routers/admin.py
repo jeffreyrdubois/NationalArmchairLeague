@@ -16,7 +16,8 @@ from app.models import (
     generate_invite_code,
 )
 from app.auth import get_current_user, require_contributor, require_admin, hash_password
-from app.services import espn, github_issues
+from app.services import espn, github_issues, payouts
+from app.services.awards import AWARD_REGISTRY
 from app.services.scoring import unscore_game, update_game_results
 from app.utils import eastern_to_utc, to_eastern
 
@@ -1254,6 +1255,185 @@ async def delete_invite(
     )
 
 
+# ---------------------------------------------------------------------------
+# Prize payouts — the plan, the playground, and what it all pays out
+# ---------------------------------------------------------------------------
+
+def _num(value, default: float = 0.0) -> float:
+    """A form field that may be blank, absent, or nonsense."""
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError, AttributeError):
+        return default
+
+
+def _plan_from_form(form) -> payouts.Plan:
+    """Build a plan out of a submitted playground form.
+
+    Places and awards left blank or set to zero are simply not prizes, so they
+    drop out here rather than being stored as $0 rules.
+    """
+    weekly: dict[int, float] = {}
+    season: dict[int, float] = {}
+    for prefix, target in ((payouts.WEEKLY, weekly), (payouts.SEASON, season)):
+        places = form.getlist(f"{prefix}_place")
+        amounts = form.getlist(f"{prefix}_amount")
+        for place, amount in zip(places, amounts):
+            try:
+                rank = int(str(place).strip())
+            except (TypeError, ValueError):
+                continue
+            value = _num(amount)
+            if rank > 0 and value > 0:
+                target[rank] = round(value, 2)
+
+    awards: dict[str, float] = {}
+    for award_id, amount in zip(form.getlist("award_id"), form.getlist("award_amount")):
+        value = _num(amount)
+        if award_id and value > 0:
+            awards[award_id] = round(value, 2)
+
+    paid_weeks = int(_num(form.get("paid_weeks"), payouts.DEFAULT_PAID_WEEKS))
+    return payouts.Plan(
+        pool=round(max(0.0, _num(form.get("pool_amount"))), 2),
+        paid_weeks=max(0, min(paid_weeks, 30)),
+        weekly=weekly,
+        season=season,
+        awards=awards,
+        notes=(form.get("notes") or "").strip(),
+        is_configured=True,
+    )
+
+
+def _place_rows(amounts: dict[int, float], minimum: int) -> list[int]:
+    """The place numbers the editor renders — always a few spare rows."""
+    highest = max(list(amounts.keys()) + [0])
+    return list(range(1, max(minimum, highest) + 1))
+
+
+def _render_payouts(
+    request: Request,
+    db: Session,
+    user: User,
+    season: Season,
+    plan: payouts.Plan,
+    *,
+    is_preview: bool = False,
+    msg: str | None = None,
+    error: str | None = None,
+):
+    """Render the payouts page for a plan — saved or straight off the form."""
+    saved_plan = payouts.load_plan(db, season.id)
+    report = payouts.compute_payouts(db, season, plan)
+    active_users = (
+        db.query(User)
+        .filter(User.is_active == True)  # noqa: E712
+        .order_by(User.last_name, User.first_name)
+        .all()
+    )
+    return templates.TemplateResponse("admin/payouts.html", {
+        "request":        request,
+        "user":           user,
+        "season":         season,
+        "seasons":        db.query(Season).order_by(Season.year.desc()).all(),
+        "plan":           plan,
+        "totals":         payouts.plan_totals(plan),
+        "report":         report,
+        "ledger":         payouts.payout_ledger(db, report, active_users),
+        "weekly_places":  _place_rows(plan.weekly, payouts.MIN_WEEKLY_PLACES),
+        "season_places":  _place_rows(plan.season, payouts.MIN_SEASON_PLACES),
+        "awards":         [a for a in AWARD_REGISTRY if a.enabled],
+        "is_preview":     is_preview,
+        "has_saved_plan": saved_plan.is_configured,
+        "season_weeks":   payouts.default_paid_weeks(db, season.id),
+        "msg":            msg or request.query_params.get("msg"),
+        "error":          error or request.query_params.get("error"),
+    })
+
+
+def _payouts_season(db: Session, season_id: int | None) -> Season | None:
+    if season_id:
+        return db.query(Season).filter(Season.id == season_id).first()
+    return db.query(Season).filter(Season.is_active == True).first()  # noqa: E712
+
+
+@router.get("/payouts", response_class=HTMLResponse)
+async def payouts_page(
+    request: Request,
+    season_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        return RedirectResponse(url="/", status_code=303)
+
+    season = _payouts_season(db, season_id)
+    if not season:
+        return templates.TemplateResponse(
+            "dashboard/no_season.html", {"request": request, "user": user}
+        )
+
+    return _render_payouts(request, db, user, season, payouts.load_plan(db, season.id))
+
+
+@router.post("/payouts/preview", response_class=HTMLResponse)
+async def preview_payouts(request: Request, db: Session = Depends(get_db)):
+    """Price a set of numbers without committing to them.
+
+    The whole point of the playground: change first place to $15 and see what
+    the season would have paid so far, then decide whether to save it.
+    """
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    form = await request.form()
+    season = _payouts_season(db, int(_num(form.get("season_id"))) or None)
+    if not season:
+        return RedirectResponse(url="/admin/payouts", status_code=303)
+
+    return _render_payouts(
+        request, db, user, season, _plan_from_form(form),
+        is_preview=True,
+        msg="Previewing these numbers — nothing is saved until you hit Save Plan.",
+    )
+
+
+@router.post("/payouts/save")
+async def save_payouts(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    form = await request.form()
+    season = _payouts_season(db, int(_num(form.get("season_id"))) or None)
+    if not season:
+        return RedirectResponse(url="/admin/payouts", status_code=303)
+
+    from urllib.parse import quote
+
+    plan = _plan_from_form(form)
+    payouts.save_plan(db, season, plan, user)
+
+    totals = payouts.plan_totals(plan)
+    if totals["is_balanced"]:
+        msg = f"Plan saved — the full ${totals['pool']:.2f} pool is allocated."
+    elif totals["is_over"]:
+        msg = (
+            f"Plan saved, but it pays out ${abs(totals['remaining']):.2f} "
+            f"more than the ${totals['pool']:.2f} pool."
+        )
+    else:
+        msg = (
+            f"Plan saved — ${totals['remaining']:.2f} of the "
+            f"${totals['pool']:.2f} pool is still unallocated."
+        )
+    return RedirectResponse(
+        url=f"/admin/payouts?season_id={season.id}&msg={quote(msg)}",
+        status_code=303,
+    )
+
+
 def _get_fund_settings(db: Session) -> dict:
     rows = {r.key: r.value for r in db.query(AppSetting).filter(
         AppSetting.key.in_(["entry_fee", "payment_venmo", "payment_paypal", "payment_cashapp", "payment_zelle"])
@@ -1296,6 +1476,23 @@ async def funds_page(request: Request, db: Session = Depends(get_db)):
         .all()
     )
 
+    # What the prize plan says the league owes, against what has been logged.
+    # Recomputed on every load rather than stored, so editing the plan moves
+    # these numbers for weeks that have already been played.
+    season = db.query(Season).filter(Season.is_active == True).first()  # noqa: E712
+    plan = payouts.load_plan(db, season.id) if season else payouts.Plan()
+    report = payouts.compute_payouts(db, season, plan) if season else payouts.PayoutReport(plan)
+    # Somebody who has left the league can still be owed for a week they won,
+    # so the ledger covers anyone with money on either side of it.
+    ledger_users = list(users)
+    known = {u.id for u in ledger_users}
+    for line in report.lines:
+        if line.user.id not in known:
+            ledger_users.append(line.user)
+            known.add(line.user.id)
+    ledger = payouts.payout_ledger(db, report, ledger_users)
+    total_owed = round(sum(row["owed"] for row in ledger if row["owed"] > 0), 2)
+
     return templates.TemplateResponse("admin/funds.html", {
         "request":           request,
         "user":              user,
@@ -1308,6 +1505,15 @@ async def funds_page(request: Request, db: Session = Depends(get_db)):
         "total_outstanding": sum(max(0, s["balance"]) for s in user_stats),
         "total_paid_out":    sum(s["received"] for s in user_stats),
         "users":             users,
+        "season":            season,
+        "plan":              plan,
+        "plan_totals":       payouts.plan_totals(plan),
+        "report":            report,
+        "ledger":            ledger,
+        "total_owed":        total_owed,
+        # Most recent first: the week you are about to pay out is the one at
+        # the top of the page, not the bottom.
+        "payout_weeks":      list(reversed(report.weeks)),
         "msg":   request.query_params.get("msg"),
         "error": request.query_params.get("error"),
     })
@@ -1373,6 +1579,59 @@ async def log_transaction(
     ))
     db.commit()
     return RedirectResponse(url="/admin/funds", status_code=303)
+
+
+@router.post("/funds/payouts/settle")
+async def settle_payouts(request: Request, db: Session = Depends(get_db)):
+    """Log an outgoing transaction for everybody the prize plan still owes.
+
+    Three winners a week is three trips through the same form, so this does the
+    round in one go. It only writes down what was paid — the money still has to
+    leave by Venmo or a handshake.
+    """
+    admin = get_current_user(request, db)
+    if not admin or admin.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    from urllib.parse import quote
+
+    season = db.query(Season).filter(Season.is_active == True).first()  # noqa: E712
+    if not season:
+        return RedirectResponse(
+            url="/admin/funds?error=No+active+season", status_code=303
+        )
+
+    plan = payouts.load_plan(db, season.id)
+    report = payouts.compute_payouts(db, season, plan)
+    users = {u.id: u for u in db.query(User).all()}
+    ledger = payouts.payout_ledger(db, report, list(users.values()))
+
+    note = f"Prize payout ({season.year})"
+    paid_count = 0
+    paid_total = 0.0
+    for row in ledger:
+        if row["owed"] <= 0:
+            continue
+        db.add(Transaction(
+            user_id=row["user"].id, amount=row["owed"], direction="out",
+            note=note, logged_by_id=admin.id,
+        ))
+        paid_count += 1
+        paid_total += row["owed"]
+
+    if not paid_count:
+        return RedirectResponse(
+            url="/admin/funds?msg=Nothing+outstanding+to+log", status_code=303
+        )
+
+    db.add(AuditLog(
+        user_id=admin.id, action="settle_payouts",
+        target_type="season", target_id=season.id,
+        detail=f"Logged {paid_count} payout(s) totalling ${paid_total:.2f} for {season.year}",
+    ))
+    db.commit()
+    msg = f"Logged {paid_count} payout(s) totalling ${paid_total:.2f}."
+    return RedirectResponse(url=f"/admin/funds?msg={quote(msg)}", status_code=303)
 
 
 @router.post("/funds/transaction/{txn_id}/delete")

@@ -32,3 +32,17 @@ def eastern_to_utc(dt: Optional[datetime]) -> Optional[datetime]:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=EASTERN)
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+_ORDINAL_SUFFIX = {1: "st", 2: "nd", 3: "rd"}
+
+
+def ordinal(n: int) -> str:
+    """1 → '1st', 2 → '2nd', 11 → '11th'. Used for finishing places."""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return str(n)
+    if 10 <= (n % 100) <= 20:
+        return f"{n}th"
+    return f"{n}{_ORDINAL_SUFFIX.get(n % 10, 'th')}"

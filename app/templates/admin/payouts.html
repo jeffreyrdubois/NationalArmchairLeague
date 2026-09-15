@@ -1,0 +1,484 @@
+{% extends "base.html" %}
+{% block title %}Prize Payouts &mdash; NAL{% endblock %}
+
+{% block content %}
+
+<div class="flex flex-wrap items-center justify-between gap-3 mb-2">
+  <h1 class="text-2xl font-bold">Prize Payouts</h1>
+  <div class="flex items-center gap-4 text-sm">
+    <a href="/admin/funds" class="text-blue-600 hover:underline">League Funds &rarr;</a>
+    <a href="/admin/" class="text-blue-600 hover:underline">&larr; Admin Panel</a>
+  </div>
+</div>
+
+<p class="text-sm text-gray-500 mb-6">
+  Decide how the season's pool is split up, and check the numbers add up before you
+  commit to them. Nothing is locked in per week &mdash; every payout is worked out from
+  the plan below against the standings as they stand, so
+  <strong>changing an amount changes what past weeks paid too</strong>.
+</p>
+
+{% if msg %}
+<div class="bg-green-50 border border-green-300 text-green-800 rounded-xl px-4 py-3 mb-6 text-sm">{{ msg }}</div>
+{% endif %}
+{% if error %}
+<div class="bg-red-50 border border-red-300 text-red-800 rounded-xl px-4 py-3 mb-6 text-sm">{{ error }}</div>
+{% endif %}
+
+<!-- ── Season picker ── -->
+<form method="get" action="/admin/payouts" class="flex items-center gap-2 mb-6 text-sm">
+  <label class="text-gray-500">Season</label>
+  <select name="season_id" onchange="this.form.submit()" class="border rounded px-3 py-1.5 text-sm">
+    {% for s in seasons %}
+    <option value="{{ s.id }}" {% if s.id == season.id %}selected{% endif %}>
+      {{ s.year }}{% if s.is_active %} (active){% endif %}
+    </option>
+    {% endfor %}
+  </select>
+  {% if not has_saved_plan %}
+  <span class="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded">No plan saved yet for {{ season.year }}</span>
+  {% endif %}
+</form>
+
+<form method="post" action="/admin/payouts/save" id="plan-form">
+  <input type="hidden" name="season_id" value="{{ season.id }}" />
+
+  <!-- ── Running total ── -->
+  <div class="bg-gray-900 text-white rounded-xl shadow p-5 mb-6 sticky top-2 z-30">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 items-end">
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">Total Pool ($)</label>
+        <input name="pool_amount" type="number" step="0.01" min="0" data-money
+          value="{{ "%.2f" | format(plan.pool) }}"
+          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-lg font-bold" />
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">Weeks Paid</label>
+        <input name="paid_weeks" type="number" step="1" min="0" max="30" data-money
+          value="{{ plan.paid_weeks }}"
+          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-lg font-bold" />
+        <p class="text-[11px] text-gray-500 mt-1">{{ season.year }} has {{ season_weeks }} regular weeks</p>
+      </div>
+      <div>
+        <div class="text-xs text-gray-400 mb-1">Allocated</div>
+        <div class="text-2xl font-bold" id="sum-allocated">$0.00</div>
+      </div>
+      <div>
+        <div class="text-xs text-gray-400 mb-1">Left to Allocate</div>
+        <div class="text-2xl font-bold" id="sum-remaining">$0.00</div>
+      </div>
+      <div class="col-span-2 sm:col-span-3 lg:col-span-1">
+        <div id="sum-status" class="text-sm font-semibold px-3 py-2 rounded-lg text-center">&nbsp;</div>
+      </div>
+    </div>
+
+    <!-- Stacked allocation bar -->
+    <div class="mt-4">
+      <div class="flex h-3 w-full rounded-full overflow-hidden bg-gray-700">
+        <div id="bar-weekly" class="bg-yellow-400" style="width:0%"></div>
+        <div id="bar-season" class="bg-emerald-400" style="width:0%"></div>
+        <div id="bar-awards" class="bg-sky-400" style="width:0%"></div>
+      </div>
+      <div class="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-xs text-gray-300">
+        <span><span class="inline-block w-2 h-2 rounded-full bg-yellow-400 mr-1"></span>Weekly <b id="leg-weekly">$0.00</b></span>
+        <span><span class="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1"></span>Season End <b id="leg-season">$0.00</b></span>
+        <span><span class="inline-block w-2 h-2 rounded-full bg-sky-400 mr-1"></span>Awards <b id="leg-awards">$0.00</b></span>
+        <span class="text-gray-500">Per week <b id="leg-perweek">$0.00</b></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+
+    <!-- ── Weekly prizes ── -->
+    <div class="bg-white rounded-xl shadow p-5">
+      <h2 class="font-semibold text-lg mb-1">Weekly Prizes</h2>
+      <p class="text-xs text-gray-500 mb-4">
+        Paid to the top of each week's standings, every week from 1 to the
+        <em>Weeks Paid</em> number above. Leave a place blank if it doesn't pay.
+      </p>
+      <table class="w-full text-sm" id="weekly-table">
+        <thead class="text-xs text-gray-500 uppercase">
+          <tr><th class="text-left pb-2">Place</th><th class="text-left pb-2">Per Week ($)</th><th class="text-right pb-2">Season Cost</th></tr>
+        </thead>
+        <tbody>
+          {% for place in weekly_places %}
+          <tr data-place-row="weekly">
+            <td class="py-1 pr-3 font-medium whitespace-nowrap w-20">
+              <input type="hidden" name="weekly_place" value="{{ place }}" />
+              <span data-place-label>{{ place | ordinal }}</span>
+            </td>
+            <td class="py-1 pr-3">
+              <input name="weekly_amount" type="number" step="0.01" min="0" data-money data-weekly
+                value="{% if plan.weekly.get(place) %}{{ "%.2f" | format(plan.weekly.get(place)) }}{% endif %}"
+                placeholder="0.00" class="w-full border rounded px-2 py-1 text-sm" />
+            </td>
+            <td class="py-1 text-right text-gray-500 whitespace-nowrap" data-weekly-cost>&mdash;</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <button type="button" class="mt-3 text-xs px-2 py-1 rounded border hover:bg-gray-50"
+        onclick="addPlace('weekly')">+ Add a place</button>
+      <div class="mt-4 pt-3 border-t flex justify-between text-sm">
+        <span class="text-gray-500">Per week</span><b id="weekly-per-week">$0.00</b>
+      </div>
+      <div class="flex justify-between text-sm">
+        <span class="text-gray-500">&times; <span id="weekly-weeks">0</span> weeks</span>
+        <b id="weekly-total">$0.00</b>
+      </div>
+    </div>
+
+    <!-- ── Season-end prizes ── -->
+    <div class="bg-white rounded-xl shadow p-5">
+      <h2 class="font-semibold text-lg mb-1">Season End Prizes</h2>
+      <p class="text-xs text-gray-500 mb-4">
+        Paid once, on the final season standings. These stay a projection until
+        every week has been played.
+      </p>
+      <table class="w-full text-sm" id="season-table">
+        <thead class="text-xs text-gray-500 uppercase">
+          <tr><th class="text-left pb-2">Place</th><th class="text-left pb-2">Amount ($)</th></tr>
+        </thead>
+        <tbody>
+          {% for place in season_places %}
+          <tr data-place-row="season">
+            <td class="py-1 pr-3 font-medium whitespace-nowrap w-20">
+              <input type="hidden" name="season_place" value="{{ place }}" />
+              <span data-place-label>{{ place | ordinal }}</span>
+            </td>
+            <td class="py-1">
+              <input name="season_amount" type="number" step="0.01" min="0" data-money data-season
+                value="{% if plan.season.get(place) %}{{ "%.2f" | format(plan.season.get(place)) }}{% endif %}"
+                placeholder="0.00" class="w-full border rounded px-2 py-1 text-sm" />
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <button type="button" class="mt-3 text-xs px-2 py-1 rounded border hover:bg-gray-50"
+        onclick="addPlace('season')">+ Add a place</button>
+      <div class="mt-4 pt-3 border-t flex justify-between text-sm">
+        <span class="text-gray-500">Season end total</span><b id="season-total">$0.00</b>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Awards ── -->
+  <div class="bg-white rounded-xl shadow p-5 mb-6">
+    <h2 class="font-semibold text-lg mb-1">Award Prizes</h2>
+    <p class="text-xs text-gray-500 mb-4">
+      One prize per award, paid to whoever leads it when the season ends. A tie splits
+      it, and an award nobody has scored on pays nothing.
+    </p>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {% for award in awards %}
+      <div class="border rounded-lg p-3">
+        <div class="font-medium text-sm">{{ award.name }}</div>
+        <p class="text-xs text-gray-400 mt-0.5 mb-2 line-clamp-2">{{ award.description[:90] }}&hellip;</p>
+        <input type="hidden" name="award_id" value="{{ award.id }}" />
+        <input name="award_amount" type="number" step="0.01" min="0" data-money data-award
+          value="{% if plan.awards.get(award.id) %}{{ "%.2f" | format(plan.awards.get(award.id)) }}{% endif %}"
+          placeholder="0.00" class="w-full border rounded px-2 py-1 text-sm" />
+      </div>
+      {% endfor %}
+    </div>
+    <div class="mt-4 pt-3 border-t flex justify-between text-sm">
+      <span class="text-gray-500">Awards total</span><b id="awards-total">$0.00</b>
+    </div>
+  </div>
+
+  <!-- ── Notes + actions ── -->
+  <div class="bg-white rounded-xl shadow p-5 mb-8">
+    <label class="block text-xs text-gray-500 mb-1">Notes <span class="text-gray-400">(optional &mdash; for you, not shown to players)</span></label>
+    <textarea name="notes" rows="2" maxlength="1000"
+      class="w-full border rounded px-3 py-1.5 text-sm resize-none"
+      placeholder="e.g. 2026: $15/$10/$5 weekly, top 4 at year end">{{ plan.notes }}</textarea>
+
+    <div class="flex flex-wrap gap-3 mt-4">
+      <button type="submit" formaction="/admin/payouts/preview" formnovalidate
+        class="border border-gray-300 text-gray-700 font-medium text-sm px-5 py-2 rounded-lg hover:bg-gray-50">
+        Preview Without Saving
+      </button>
+      <button type="submit" formaction="/admin/payouts/save"
+        class="bg-yellow-400 text-gray-900 font-bold text-sm px-5 py-2 rounded-lg hover:bg-yellow-300">
+        Save Plan
+      </button>
+      <span class="text-xs text-gray-400 self-center">
+        Saving applies to every week of {{ season.year }}, including the ones already played.
+      </span>
+    </div>
+  </div>
+</form>
+
+<!-- ── What it pays ── -->
+<div class="flex flex-wrap items-center gap-3 mb-4">
+  <h2 class="text-xl font-bold">What This Pays Out</h2>
+  {% if is_preview %}
+  <span class="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded font-semibold">Preview &mdash; not saved</span>
+  {% else %}
+  <span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">Saved plan</span>
+  {% endif %}
+</div>
+
+{% if not plan.is_configured %}
+<div class="bg-white rounded-xl shadow p-5 mb-8 text-sm text-gray-500">
+  Nothing is set yet. Fill in the amounts above and hit <b>Preview Without Saving</b> to
+  see what {{ season.year }} would have paid so far.
+</div>
+{% else %}
+
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+  <div class="bg-white rounded-xl shadow p-4 text-center">
+    <div class="text-2xl font-bold text-green-600">${{ "%.2f" | format(report.earned_total) }}</div>
+    <div class="text-xs text-gray-500 mt-1">Earned so far</div>
+  </div>
+  <div class="bg-white rounded-xl shadow p-4 text-center">
+    <div class="text-2xl font-bold text-gray-500">${{ "%.2f" | format(report.projected_total) }}</div>
+    <div class="text-xs text-gray-500 mt-1">Projected (not final)</div>
+  </div>
+  <div class="bg-white rounded-xl shadow p-4 text-center">
+    <div class="text-2xl font-bold">{{ report.weeks_paid }}</div>
+    <div class="text-xs text-gray-500 mt-1">Weeks paid out</div>
+  </div>
+  <div class="bg-white rounded-xl shadow p-4 text-center">
+    <div class="text-2xl font-bold {% if report.season_complete %}text-green-600{% else %}text-gray-400{% endif %}">
+      {% if report.season_complete %}Final{% else %}Live{% endif %}
+    </div>
+    <div class="text-xs text-gray-500 mt-1">Season status</div>
+  </div>
+</div>
+
+<!-- Per player -->
+<div class="bg-white rounded-xl shadow p-5 mb-6">
+  <h3 class="font-semibold mb-3">Per Player</h3>
+  {% if not ledger %}
+  <p class="text-sm text-gray-500">No players yet.</p>
+  {% else %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+        <tr>
+          <th class="text-left px-3 py-2">Player</th>
+          <th class="text-right px-3 py-2">Earned</th>
+          <th class="text-right px-3 py-2">Projected</th>
+          <th class="text-right px-3 py-2">Paid</th>
+          <th class="text-right px-3 py-2">Owed</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in ledger %}
+        <tr class="border-t {% if not row.earned and not row.projected %}text-gray-400{% endif %}">
+          <td class="px-3 py-2 font-medium whitespace-nowrap">{{ row.user.full_name }}</td>
+          <td class="px-3 py-2 text-right">${{ "%.2f" | format(row.earned) }}</td>
+          <td class="px-3 py-2 text-right text-gray-400">
+            {% if row.projected %}+${{ "%.2f" | format(row.projected) }}{% else %}&mdash;{% endif %}
+          </td>
+          <td class="px-3 py-2 text-right text-blue-600">${{ "%.2f" | format(row.paid) }}</td>
+          <td class="px-3 py-2 text-right font-semibold {% if row.owed > 0 %}text-red-600{% elif row.owed < 0 %}text-amber-600{% else %}text-gray-400{% endif %}">
+            ${{ "%.2f" | format(row.owed) }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if is_preview %}
+  <p class="text-xs text-gray-400 mt-3">
+    "Paid" is what you have already logged on the League Funds page. Under these numbers,
+    that is what each player's balance would become.
+  </p>
+  {% endif %}
+  {% endif %}
+</div>
+
+<!-- Week by week -->
+<div class="bg-white rounded-xl shadow p-5 mb-6">
+  <h3 class="font-semibold mb-3">Week by Week</h3>
+  {% if not report.weeks %}
+  <p class="text-sm text-gray-500">
+    {% if not plan.weekly %}No weekly prizes are set.{% else %}No week has finished yet &mdash; a week pays out once its last game is final.{% endif %}
+  </p>
+  {% else %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+        <tr>
+          <th class="text-left px-3 py-2">Week</th>
+          <th class="text-left px-3 py-2">Winners</th>
+          <th class="text-right px-3 py-2">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for wk in report.weeks | reverse %}
+        <tr class="border-t align-top">
+          <td class="px-3 py-2 font-medium whitespace-nowrap">Week {{ wk.week.week_number }}</td>
+          <td class="px-3 py-2">
+            <div class="flex flex-wrap gap-x-4 gap-y-1">
+              {% for line in wk.lines %}
+              <span><span class="text-gray-400">{{ line.place }}</span>
+                {{ line.user.full_name }}
+                <b class="text-green-700">${{ "%.2f" | format(line.amount) }}</b></span>
+              {% else %}
+              <span class="text-gray-400">Nobody &mdash; no picks that week</span>
+              {% endfor %}
+            </div>
+          </td>
+          <td class="px-3 py-2 text-right font-semibold whitespace-nowrap">${{ "%.2f" | format(wk.total) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Season end + awards -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+  <div class="bg-white rounded-xl shadow p-5">
+    <h3 class="font-semibold mb-1">Season End</h3>
+    <p class="text-xs text-gray-400 mb-3">
+      {% if report.season_complete %}Final &mdash; the season is over.{% else %}As things stand right now. Not owed until the season finishes.{% endif %}
+    </p>
+    {% if not report.season_lines %}
+    <p class="text-sm text-gray-500">{% if not plan.season %}No season end prizes are set.{% else %}Nobody has picked yet.{% endif %}</p>
+    {% else %}
+    <ul class="text-sm space-y-1">
+      {% for line in report.season_lines %}
+      <li class="flex justify-between border-b pb-1">
+        <span><span class="text-gray-400 mr-2">{{ line.place }}</span>{{ line.user.full_name }}</span>
+        <b>${{ "%.2f" | format(line.amount) }}</b>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+
+  <div class="bg-white rounded-xl shadow p-5">
+    <h3 class="font-semibold mb-1">Awards</h3>
+    <p class="text-xs text-gray-400 mb-3">
+      {% if report.season_complete %}Final &mdash; the season is over.{% else %}Current leaders. Not owed until the season finishes.{% endif %}
+    </p>
+    {% if not report.award_lines %}
+    <p class="text-sm text-gray-500">No award prizes are set.</p>
+    {% else %}
+    <ul class="text-sm space-y-1">
+      {% for award in report.award_lines %}
+      <li class="flex justify-between border-b pb-1">
+        <span>
+          <span class="font-medium">{{ award.config.name }}</span>
+          {% if award.lines %}
+            <span class="text-gray-500">&mdash;
+              {% for line in award.lines %}{{ line.user.full_name }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+          {% else %}
+            <span class="text-gray-400">&mdash; nobody yet</span>
+          {% endif %}
+        </span>
+        <b>${{ "%.2f" | format(award.amount) }}</b>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+</div>
+
+{% endif %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  function ordinal(n) {
+    var s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
+  function money(n) {
+    var cents = Math.round(n * 100) / 100;
+    // The sign belongs outside the dollar sign: "-$180.00", never "$-180.00".
+    return (cents < 0 ? '-$' : '$') + Math.abs(cents).toFixed(2);
+  }
+  function val(el) {
+    var n = parseFloat(el.value);
+    return isNaN(n) || n < 0 ? 0 : n;
+  }
+  function sum(selector) {
+    var total = 0;
+    document.querySelectorAll(selector).forEach(function (el) { total += val(el); });
+    return total;
+  }
+
+  function recalc() {
+    var pool = val(document.querySelector('[name="pool_amount"]'));
+    var weeks = Math.max(0, parseInt(document.querySelector('[name="paid_weeks"]').value, 10) || 0);
+
+    var perWeek = sum('[data-weekly]');
+    var weeklyTotal = perWeek * weeks;
+    var seasonTotal = sum('[data-season]');
+    var awardsTotal = sum('[data-award]');
+    var allocated = weeklyTotal + seasonTotal + awardsTotal;
+    var remaining = pool - allocated;
+
+    // Per-row season cost for the weekly places
+    document.querySelectorAll('#weekly-table [data-place-row]').forEach(function (row) {
+      var input = row.querySelector('[data-weekly]');
+      var cell = row.querySelector('[data-weekly-cost]');
+      var amount = val(input);
+      cell.textContent = amount ? money(amount * weeks) : '—';
+    });
+
+    document.getElementById('weekly-per-week').textContent = money(perWeek);
+    document.getElementById('weekly-weeks').textContent = weeks;
+    document.getElementById('weekly-total').textContent = money(weeklyTotal);
+    document.getElementById('season-total').textContent = money(seasonTotal);
+    document.getElementById('awards-total').textContent = money(awardsTotal);
+    document.getElementById('sum-allocated').textContent = money(allocated);
+    document.getElementById('sum-remaining').textContent = money(remaining);
+    document.getElementById('leg-weekly').textContent = money(weeklyTotal);
+    document.getElementById('leg-season').textContent = money(seasonTotal);
+    document.getElementById('leg-awards').textContent = money(awardsTotal);
+    document.getElementById('leg-perweek').textContent = money(perWeek);
+
+    // Bar widths are shares of whichever is bigger — the pool or what the plan
+    // actually commits — so overspending visibly fills past the pool.
+    var scale = Math.max(pool, allocated) || 1;
+    document.getElementById('bar-weekly').style.width = (weeklyTotal / scale * 100) + '%';
+    document.getElementById('bar-season').style.width = (seasonTotal / scale * 100) + '%';
+    document.getElementById('bar-awards').style.width = (awardsTotal / scale * 100) + '%';
+
+    var status = document.getElementById('sum-status');
+    var left = document.getElementById('sum-remaining');
+    if (Math.abs(remaining) < 0.005 && pool > 0) {
+      status.textContent = 'Fully allocated ✓';
+      status.className = 'text-sm font-semibold px-3 py-2 rounded-lg text-center bg-green-500 text-white';
+      left.className = 'text-2xl font-bold text-green-400';
+    } else if (remaining < 0) {
+      status.textContent = money(-remaining) + ' over the pool';
+      status.className = 'text-sm font-semibold px-3 py-2 rounded-lg text-center bg-red-500 text-white';
+      left.className = 'text-2xl font-bold text-red-400';
+    } else {
+      status.textContent = money(remaining) + ' unallocated';
+      status.className = 'text-sm font-semibold px-3 py-2 rounded-lg text-center bg-amber-400 text-gray-900';
+      left.className = 'text-2xl font-bold text-amber-300';
+    }
+  }
+
+  function addPlace(kind) {
+    var body = document.querySelector('#' + kind + '-table tbody');
+    var last = body.querySelector('tr:last-child');
+    var row = last.cloneNode(true);
+    var place = parseInt(last.querySelector('input[type="hidden"]').value, 10) + 1;
+    row.querySelector('input[type="hidden"]').value = place;
+    row.querySelector('[data-place-label]').textContent = ordinal(place);
+    var amount = row.querySelector('input[type="number"]');
+    amount.value = '';
+    amount.addEventListener('input', recalc);
+    body.appendChild(row);
+    recalc();
+  }
+
+  document.querySelectorAll('[data-money]').forEach(function (el) {
+    el.addEventListener('input', recalc);
+  });
+  recalc();
+</script>
+{% endblock %}
