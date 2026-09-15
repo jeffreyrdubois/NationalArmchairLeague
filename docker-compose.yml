@@ -21,6 +21,18 @@ services:
       # Keep this on a cache pool, not a FUSE /mnt/user path — SQLite over
       # Unraid's user share layer has a long history of locking problems.
       - ./data:/app/data
+
+      # Optional, and commented out on purpose. Uncomment to update the app
+      # from its own admin page (Manage -> Update the App) instead of pulling
+      # and restarting by hand — the container needs to talk to Docker to
+      # replace itself.
+      #
+      # Understand the trade first: anything that can reach this socket can
+      # control Docker on the host, which is as good as root there. Only admins
+      # can reach the update page and the image it pulls is fixed in code, but
+      # a bug anywhere in the app becomes a much more serious one with this
+      # mapped. Leave it commented out and ./update.sh still works.
+      # - /var/run/docker.sock:/var/run/docker.sock
     environment:
       # Loaded from .env file — never hardcode secrets here.
       # SECRET_KEY is optional: left unset, the container generates one into
@@ -37,6 +49,13 @@ services:
 
       # Optional override. Unset, the image defaults to the volume path above.
       - DATABASE_URL
+
+      # In-app updating (see the commented-out docker.sock mapping above).
+      # All optional: the app works out its own container and reads the public
+      # registry anonymously.
+      - UPDATE_CONTAINER_NAME
+      - UPDATE_HEALTH_TIMEOUT
+      - DOCKER_SOCKET
 
       # File ownership on the ./data volume. 99:100 (nobody:users) is the
       # Unraid default and is almost always right.

@@ -405,6 +405,11 @@ Registry (`ghcr.io/jeffreyrdubois/nationalarmchairleague:latest`), for both
 amd64 and arm64. Updating pulls that image — there is nothing to compile on the
 server, so an update takes seconds rather than minutes.
 
+**From the app itself** — Admin Panel → **Update the App** (`/admin/update`).
+Pick a version, type its tag to confirm, and the app pulls the image and
+restarts itself. Needs the Docker socket mapped in once; see
+[Updating from inside the app](#updating-from-inside-the-app) below.
+
 **On Unraid**, the container shows up in the Docker tab with an **update ready**
 flag once a new image is published. Click **Apply** and you are done.
 
@@ -442,6 +447,82 @@ A version ending in `-dev` means the running image was built by hand rather than
 published by CI — useful for telling "the update did not apply" apart from "the
 update applied and did not fix it".
 
+A version like `1.0.0-my-branch+a1b2c3d` is a branch build published by hand
+(see below) — it is not on `main`.
+
+### Updating from inside the app
+
+The **Update the App** page (`/admin/update`, admins only) does what the Unraid
+Docker tab does, from anywhere you can reach the league. It shows what is
+running, lists every version in the registry, and installs the one you pick.
+
+**Turning it on.** A container can only replace itself if it can talk to
+Docker, so the socket has to be mapped in — once:
+
+- **Unraid** → Docker → NAL → Edit → *Show more settings* → the
+  **Docker Socket** path → set it to `/var/run/docker.sock` → Apply.
+- **Compose** → uncomment the `/var/run/docker.sock` line in
+  `docker-compose.yml` and `docker compose up -d`.
+
+Until then the page still loads and tells you exactly what to add; nothing else
+changes and `./update.sh` keeps working.
+
+> **Know the trade.** Anything that can reach the Docker socket can control
+> Docker on the host, which is as good as root there. Only admins can reach the
+> update page, the image it pulls is fixed in the app's code (you choose a
+> version, never an image name), and you have to type the tag to confirm — but a
+> bug anywhere in the app is a more serious bug with the socket mapped. If that
+> is not a trade you want, leave it off and keep using Unraid or `./update.sh`.
+
+**What happens when you install.** The app pulls the image, then hands the swap
+to a throwaway helper container built from the version *currently* running —
+so the code responsible for undoing a bad build never comes from that build.
+The helper stops the app, parks it under another name, starts the replacement,
+and waits for it to report healthy. **If it doesn't come up, the old container
+is put straight back** and the page says so. Your database and settings live on
+the data volume, not in the image, so nothing is lost either way.
+
+The page follows along while this happens. It will go unreachable for a few
+seconds mid-swap — that is the container restarting, and it reconnects on its
+own.
+
+**Choosing a version.** The list is read from the registry and grouped:
+
+| Group | What it is |
+|---|---|
+| **Current Release** | `latest` — the newest build of `main`. The normal choice. |
+| **Tagged Releases** | Numbered versions, if any have been tagged. |
+| **Branch Builds** | Work that isn't merged yet, published by hand (below). |
+| **Individual Commits** | `sha-…`, every build of `main`. **This is how you go back** if an update turns out wrong. |
+
+**Trying a branch before you merge it.** Pull requests are built and tested by
+CI but deliberately *not* published — every push to every branch would be
+another multi-arch build and another image in the registry, for branches most of
+which are never installed. So a branch build is published only when you ask for
+one:
+
+1. Go to the repository's **Actions** tab → **Publish Docker Image** →
+   **Run workflow**.
+2. Pick the pull request's branch from the branch dropdown.
+3. In the **tag** box, type `pr-` and the pull request's number (e.g. `pr-54`).
+   Then it appears on the update page named after that pull request rather than
+   as a bare commit hash. Leave it blank and it publishes as `sha-…` only.
+4. When the build finishes, hit **Refresh list** on the update page and install
+   it.
+
+That publishes exactly one image and leaves `latest` alone, so nothing else is
+affected until you install it. To go back afterwards, install `latest` again.
+
+**If something is wrong:**
+
+| What the page says | What to do |
+|---|---|
+| *is not present in the container* | The socket isn't mapped. See *Turning it on* above. |
+| *cannot open it — the app user is not in the socket's group* | Restart the container; the entrypoint sets this up at boot. |
+| *Docker has no container called '…'* | Put the real container name (usually `nal`) in **Updater Settings** on the same page. |
+| *The registry refused the request* | Only for a private package — save a GitHub token with `read:packages` in **Updater Settings**. |
+| *The previous version has been restored* | The new build didn't come up. You are back on the old one; nothing to do. |
+
 ---
 
 ## Quick Reference
@@ -458,5 +539,6 @@ update applied and did not fix it".
 | Admin Panel | `/admin/` | Admin |
 | Prize Payouts | `/admin/payouts` | Admin |
 | League Funds | `/admin/funds` | Admin |
+| Update the App | `/admin/update` | Admin |
 | Week Admin | `/admin/week/{id}` | Admin |
 | Users | `/admin/users` | Admin |

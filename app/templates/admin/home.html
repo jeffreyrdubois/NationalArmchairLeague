@@ -497,6 +497,21 @@
   </form>
 </div>
 
+<!-- ── Updating the app ── -->
+<div class="bg-white rounded-xl shadow p-5 mb-8" id="update">
+  <h2 class="font-semibold text-lg mb-1">Update the App</h2>
+  <p class="text-xs text-gray-500 mb-4">
+    Pull a new version and restart the container from here, without a VPN and a trip
+    through Unraid. You pick which version &mdash; including a branch build, to try
+    something before it is merged.
+  </p>
+  <a href="/admin/update"
+    class="inline-block bg-gray-900 text-white text-sm px-4 py-2 rounded-lg hover:bg-gray-700">
+    Open the updater
+  </a>
+  <span class="text-xs text-gray-400 ml-3">Currently running v{{ app_version }}</span>
+</div>
+
 <!-- Recent audit log -->
 <div class="bg-white rounded-xl shadow p-5">
   <h2 class="font-semibold text-lg mb-4">Recent Activity</h2>

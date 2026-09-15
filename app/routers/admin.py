@@ -4,6 +4,7 @@ Admin and Contributor routes.
 - Contributors: update spreads and scores manually
 - Admins: all of the above + manage users, edit any pick, manage seasons/weeks
 """
+import os
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, Depends, Form, HTTPException, BackgroundTasks
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
@@ -17,6 +18,7 @@ from app.models import (
 )
 from app.auth import get_current_user, require_contributor, require_admin, hash_password
 from app.services import espn, github_issues, payouts
+from app.services import docker_api, registry, selfupdate
 from app.services.awards import AWARD_REGISTRY
 from app.services.scoring import unscore_game, update_game_results
 from app.utils import eastern_to_utc, to_eastern
@@ -1656,6 +1658,228 @@ async def delete_transaction(
     db.delete(txn)
     db.commit()
     return RedirectResponse(url="/admin/funds", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Updating the app from inside the app
+# ---------------------------------------------------------------------------
+
+UPDATE_SETTING_KEYS = (
+    "update_registry_user", "update_registry_token", "update_container_name",
+)
+
+
+def _update_settings(db: Session) -> dict:
+    rows = {
+        r.key: (r.value or "").strip()
+        for r in db.query(AppSetting).filter(AppSetting.key.in_(UPDATE_SETTING_KEYS)).all()
+    }
+    return {
+        "registry_user":  rows.get("update_registry_user", ""),
+        "registry_token": rows.get("update_registry_token", ""),
+        "container_name": rows.get("update_container_name", "")
+                          or os.getenv("UPDATE_CONTAINER_NAME", ""),
+    }
+
+
+def _update_context(request: Request, db: Session, user: User) -> dict:
+    settings = _update_settings(db)
+    github = github_issues.get_config(db)
+    socket = docker_api.socket_status()
+    versions = registry.list_versions(
+        github_repo=github["repo"],
+        registry_token=settings["registry_token"],
+        registry_user=settings["registry_user"],
+        # Reusing the issue-reporting token, which is for this same repository,
+        # so a branch build can be listed by the pull request's title rather
+        # than as a bare tag. Only used to read pull requests, and only to
+        # label the list — without it everything still works, less readably.
+        github_token=github["token"],
+    )
+    status = selfupdate.read_status()
+    if selfupdate.is_stalled(status):
+        status = dict(status, state="failed", message=(
+            "The update stopped reporting. Check the container is running, "
+            "then try again."
+        ))
+    return {
+        "request":        request,
+        "user":           user,
+        "socket":         socket,
+        "versions":       versions,
+        "status":         status,
+        "in_progress":    selfupdate.is_running(),
+        "settings":       settings,
+        # The token itself is never rendered back — only whether one is saved.
+        "has_registry_token": bool(settings["registry_token"]),
+        "current": {
+            "version": main_version(),
+            "built_at": os.getenv("BUILD_DATE", ""),
+            "commit":  os.getenv("GIT_COMMIT", ""),
+            "image":   selfupdate.IMAGE_REPOSITORY,
+        },
+        "socket_path":    docker_api.default_socket(),
+        # Where the "publish a branch build" instructions point.
+        "github_repo":    github["repo"],
+        "msg":   request.query_params.get("msg"),
+        "error": request.query_params.get("error"),
+    }
+
+
+def main_version() -> str:
+    return os.getenv("APP_VERSION", "0.0.0-dev")
+
+
+@router.get("/update", response_class=HTMLResponse)
+async def update_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        return RedirectResponse(url="/", status_code=303)
+    return templates.TemplateResponse(
+        "admin/update.html", _update_context(request, db, user)
+    )
+
+
+@router.get("/update/status")
+async def update_status(request: Request, db: Session = Depends(get_db)):
+    """Polled while an update runs, including by the version that replaces us.
+
+    The status lives in a file on the data volume precisely so this keeps
+    answering across the swap: the page that asked for the update is finished
+    by a process that did not exist when it started.
+    """
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+    status = selfupdate.read_status()
+    status["running"] = selfupdate.is_running()
+    status["current_version"] = main_version()
+    if selfupdate.is_stalled(status):
+        # Say so rather than spinning: the helper died, or the host rebooted
+        # mid-swap. Whatever happened, the answer is to look at the container
+        # and try again, not to keep waiting.
+        status["stalled"] = True
+        status["state"] = "failed"
+        status["message"] = (
+            "The update stopped reporting. Check the container is running, "
+            "then try again."
+        )
+    return JSONResponse(status)
+
+
+@router.post("/update/start")
+async def start_update(
+    request: Request,
+    background: BackgroundTasks,
+    tag: str = Form(...),
+    confirm: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    from urllib.parse import quote
+
+    def back(**params):
+        query = "&".join(f"{k}={quote(v)}" for k, v in params.items())
+        return RedirectResponse(url=f"/admin/update?{query}", status_code=303)
+
+    socket = docker_api.socket_status()
+    if not socket["ok"]:
+        return back(error=socket["detail"])
+    if selfupdate.is_running():
+        return back(error="An update is already running.")
+    try:
+        tag = selfupdate.validate_tag(tag)
+    except ValueError as exc:
+        return back(error=str(exc))
+    if confirm != tag:
+        return back(error="The confirmation did not match the version you picked.")
+
+    settings = _update_settings(db)
+    db.add(AuditLog(
+        user_id=user.id, action="start_update", target_type="app",
+        detail=f"Update to {selfupdate.image_ref(tag)} started from {main_version()}",
+    ))
+    db.commit()
+
+    # After the response: pulling an image is minutes of work, and the browser
+    # is going to watch /update/status for the result anyway.
+    background.add_task(
+        selfupdate.start_update,
+        tag,
+        started_by=user.full_name,
+        registry_user=settings["registry_user"],
+        registry_token=settings["registry_token"],
+        self_container=settings["container_name"] or None,
+    )
+    selfupdate.write_status(
+        state="pulling", percent=0, tag=tag,
+        target_image=selfupdate.image_ref(tag),
+        from_version=main_version(), started_by=user.full_name,
+        started_at=datetime.utcnow().isoformat(timespec="seconds"),
+        message="Starting…", error="",
+    )
+    return back(msg=f"Updating to {tag}. This page will follow along.")
+
+
+@router.post("/update/settings")
+async def save_update_settings(
+    request: Request,
+    registry_user: str = Form(""),
+    registry_token: str = Form(""),
+    container_name: str = Form(""),
+    clear_token: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    db.merge(AppSetting(key="update_registry_user", value=registry_user.strip()))
+    db.merge(AppSetting(key="update_container_name", value=container_name.strip()))
+    # A blank box leaves the saved token alone — it is never rendered back, so
+    # blank means "unchanged", not "delete it". Clearing is its own button.
+    if clear_token:
+        db.merge(AppSetting(key="update_registry_token", value=""))
+    elif registry_token.strip():
+        db.merge(AppSetting(key="update_registry_token", value=registry_token.strip()))
+
+    db.add(AuditLog(
+        user_id=user.id, action="update_settings", target_type="app",
+        detail="Updater settings saved"
+              + (" (registry token cleared)" if clear_token else ""),
+    ))
+    db.commit()
+    registry.clear_cache()
+    return RedirectResponse(url="/admin/update?msg=Settings+saved", status_code=303)
+
+
+@router.post("/update/refresh")
+async def refresh_versions(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+    registry.clear_cache()
+    return RedirectResponse(url="/admin/update?msg=Version+list+refreshed", status_code=303)
+
+
+@router.post("/update/dismiss")
+async def dismiss_update_status(request: Request, db: Session = Depends(get_db)):
+    """Clear a finished update's banner.
+
+    Only a finished one: while an update is in flight this is the only record
+    of what is happening to the container.
+    """
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        raise HTTPException(status_code=403)
+    if not selfupdate.is_running():
+        selfupdate.write_status(
+            state="idle", message="No update has been run yet.", error="",
+        )
+    return RedirectResponse(url="/admin/update", status_code=303)
 
 
 @router.post("/notify")
