@@ -31,8 +31,17 @@ import threading
 from http.server import BaseHTTPRequestHandler
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-_DB_PATH = os.path.join(tempfile.mkdtemp(prefix="nal-update-"), "test.db")
-os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH}"
+_SANDBOX = tempfile.mkdtemp(prefix="nal-update-")
+os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(_SANDBOX, 'test.db')}"
+
+# No test may reach a real Docker daemon. A developer machine usually has none,
+# but a CI runner does — and a test that quietly starts talking to it is both
+# flaky and genuinely dangerous, since these are the code paths that stop and
+# replace containers. Every test either points the app at its own stand-in
+# daemon (`wired_up`) or gets this socket, which cannot exist.
+os.environ["DOCKER_SOCKET"] = os.path.join(_SANDBOX, "no-such-docker.sock")
+os.environ["DATA_DIR"] = os.path.join(_SANDBOX, "data")
+os.makedirs(os.environ["DATA_DIR"], exist_ok=True)
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -816,24 +825,48 @@ def test_only_admins_can_see_or_start_an_update():
 def test_the_page_explains_itself_when_docker_is_not_wired_up():
     db = SessionLocal()
     boss, _player = make_users(db)
-    resp = client_for(boss).get("/admin/update")
-    assert resp.status_code == 200, resp.status_code
-    assert "In-app updates are not enabled" in resp.text
-    assert "docker.sock" in resp.text, "it has to say what to add"
+    with no_docker():
+        resp = client_for(boss).get("/admin/update")
+        assert resp.status_code == 200, resp.status_code
+        assert "In-app updates are not enabled" in resp.text
+        assert "docker.sock" in resp.text, "it has to say what to add"
     db.close()
 
 
 def test_an_update_cannot_start_without_a_socket():
     db = SessionLocal()
     boss, _player = make_users(db)
-    resp = client_for(boss).post(
-        "/admin/update/start", data={"tag": "latest", "confirm": "latest"},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 303, resp.status_code
-    assert "error=" in resp.headers["location"], resp.headers["location"]
-    assert selfupdate.read_status()["state"] in ("idle", "done"), selfupdate.read_status()
+    with no_docker():
+        resp = client_for(boss).post(
+            "/admin/update/start", data={"tag": "latest", "confirm": "latest"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303, resp.status_code
+        assert "error=" in resp.headers["location"], resp.headers["location"]
+        assert "docker.sock" in resp.headers["location"], resp.headers["location"]
     db.close()
+
+
+class no_docker:
+    """Guarantee there is no Docker socket, whatever the host has.
+
+    A CI runner has a real one at the default path, so a test asserting the
+    "not wired up" behaviour has to establish that itself.
+    """
+
+    def __enter__(self):
+        self.dir = tempfile.mkdtemp(prefix="nal-nodocker-")
+        self.saved = os.environ.get("DOCKER_SOCKET")
+        # Named as the real one is, in a directory where it does not exist, so
+        # the page's "add this path" instructions still read like the real ones.
+        os.environ["DOCKER_SOCKET"] = os.path.join(self.dir, "docker.sock")
+        return self
+
+    def __exit__(self, *exc):
+        if self.saved is None:
+            os.environ.pop("DOCKER_SOCKET", None)
+        else:
+            os.environ["DOCKER_SOCKET"] = self.saved
 
 
 class wired_up:
@@ -921,6 +954,7 @@ def test_not_knowing_which_container_we_are_says_how_to_fix_it():
     db = SessionLocal()
     boss, _player = make_users(db)
     data = a_data_dir()
+    saved_hostname = os.environ.get("HOSTNAME")
     with wired_up(a_fake(data_dir=data), data, container=""):
         os.environ.pop("UPDATE_CONTAINER_NAME", None)
         os.environ["HOSTNAME"] = "not-a-container"
@@ -933,6 +967,10 @@ def test_not_knowing_which_container_we_are_says_how_to_fix_it():
         # Docker's own "no such container" says nothing an admin could act on.
         assert "UPDATE_CONTAINER_NAME" in status["error"], status
         assert "Updater Settings" in status["error"], status
+    if saved_hostname is None:
+        os.environ.pop("HOSTNAME", None)
+    else:
+        os.environ["HOSTNAME"] = saved_hostname
     db.close()
 
 

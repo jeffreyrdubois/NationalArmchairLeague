@@ -208,7 +208,11 @@ jobs:
           # As `nal`, not as root and not as 99:100 — the username form is the
           # only one that carries the supplementary group, and it is what the
           # entrypoint uses to launch the app.
-          docker exec -u nal -w /app smoke-updater python /tmp/updater_check.py
+          #
+          # PYTHONPATH rather than -w: Python puts the *script's* directory on
+          # sys.path, not the working directory, so /app has to be named.
+          docker exec -u nal -e PYTHONPATH=/app smoke-updater \
+            python /tmp/updater_check.py
 
           docker rm -f smoke-updater
 
