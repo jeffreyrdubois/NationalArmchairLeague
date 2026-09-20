@@ -211,6 +211,23 @@ class Game(Base):
     picks = relationship("Pick", back_populates="game")
     spread_override_user = relationship("User", foreign_keys=[spread_override_by])
 
+    @property
+    def is_underway(self) -> bool:
+        """Kicked off and not finished — by the clock, not just by the feed.
+
+        ``is_in_progress`` only turns on when a score sync lands, so a game is
+        live for minutes before the flag agrees, and stays "Upcoming" for the
+        whole afternoon if ESPN is unreachable and the fallback (post-game data
+        only) is all that answers. The kickoff time is already on the row, so
+        the clock settles it: past kickoff and not final means it is being
+        played, whatever the feed has managed to say.
+        """
+        if self.is_final:
+            return False
+        if self.is_in_progress:
+            return True
+        return self.kickoff_time is not None and self.kickoff_time <= datetime.utcnow()
+
 
 class Pick(Base):
     __tablename__ = "picks"

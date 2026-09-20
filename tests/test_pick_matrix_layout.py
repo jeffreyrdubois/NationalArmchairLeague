@@ -134,22 +134,27 @@ def build_week_of_mixed_games():
     db.add(week)
     db.flush()
 
-    # (away, home, hours after the first kickoff, state)
+    # (away, home, hours after the first kickoff, state). "stale" is a game
+    # that has kicked off but that no score sync has reached yet, which is what
+    # every game looks like for the first minutes of a slate — and all
+    # afternoon if ESPN is unreachable.
     schedule = [
         ("DON", "EAR", 0, "final"),
         ("UPA", "UPB", 5, "upcoming"),
         ("LIV", "ONE", 1, "live"),
         ("FIN", "TWO", 2, "final"),
+        ("STA", "LEE", 2, "stale"),
         ("LIV", "TWO", 3, "live"),
         ("UPC", "UPD", 4, "upcoming"),
     ]
     for away, home, offset, state in schedule:
+        played = state in ("final", "live")
         db.add(Game(
             week_id=week.id, home_team=home, away_team=away,
             kickoff_time=kickoff + timedelta(hours=offset), spread=-3.0,
             is_final=(state == "final"), is_in_progress=(state == "live"),
-            home_score=20 if state != "upcoming" else None,
-            away_score=17 if state != "upcoming" else None,
+            home_score=20 if played else None,
+            away_score=17 if played else None,
         ))
 
     viewer = User(first_name="Vic", last_name="Viewer", email="v@x.com",
@@ -179,10 +184,21 @@ def test_live_games_lead_then_upcoming_then_finals():
     html = client_for(ids["viewer"]).get(f"/picks/week/{ids['week']}/all").text
     order = matchups_in_order(html)
     assert order == [
-        ("LIV", "ONE"), ("LIV", "TWO"),   # live, in kickoff order
+        # Being played, in kickoff order — the stale one among them, because
+        # the clock says it kicked off however quiet the feed has been.
+        ("LIV", "ONE"), ("STA", "LEE"), ("LIV", "TWO"),
         ("UPC", "UPD"), ("UPA", "UPB"),   # then upcoming, in kickoff order
         ("DON", "EAR"), ("FIN", "TWO"),   # then the finals
     ], f"the matrix is not grouped live, upcoming, final: {order}"
+
+
+def test_a_kicked_off_game_does_not_read_upcoming():
+    """The row the feed has not reached yet still says it is being played."""
+    ids = build_week_of_mixed_games()
+    html = client_for(ids["viewer"]).get(f"/picks/week/{ids['week']}/all").text
+    row = html.split('>STA<', 1)[1].split("</tr>", 1)[0]
+    assert "Upcoming" not in row, "a game that has kicked off is still listed as upcoming"
+    assert "LIVE" in row, "a game that has kicked off is not marked live"
 
 
 def test_the_matrix_comes_before_the_week_standings():

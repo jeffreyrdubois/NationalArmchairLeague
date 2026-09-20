@@ -14,13 +14,13 @@ router = APIRouter()
 
 
 def game_sort_key(game: Game):
-    """Order games live first, then upcoming, then finished.
+    """Order games being played first, then upcoming, then finished.
 
     Only the bucket is returned: callers sort a list already in kickoff order,
     and Python's sort is stable, so the schedule still reads in order inside
     each bucket.
     """
-    if game.is_in_progress and not game.is_final:
+    if game.is_underway:
         return 0
     if game.is_final:
         return 2
