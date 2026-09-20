@@ -13,6 +13,19 @@ from app.services.visibility import get_submission_status, picks_are_revealed
 router = APIRouter()
 
 
+def game_sort_key(game: Game):
+    """Order games live first, then upcoming, then finished.
+
+    Only the bucket is returned: callers sort a list already in kickoff order,
+    and Python's sort is stable, so the schedule still reads in order inside
+    each bucket.
+    """
+    if game.is_in_progress and not game.is_final:
+        return 0
+    if game.is_final:
+        return 2
+    return 1
+
 
 def get_active_season_week(db: Session):
     season = db.query(Season).filter(Season.is_active == True).first()
@@ -260,6 +273,12 @@ async def all_picks_for_week(
         .order_by(Game.kickoff_time)
         .all()
     )
+    # Games in play come first, then the ones still to kick off, then the
+    # finals — the rows worth watching sit at the top of the matrix instead of
+    # wherever the schedule happens to put them. The sort is stable, so
+    # kickoff order survives inside each group.
+    games.sort(key=game_sort_key)
+
     # The viewer's own column comes first so it sits inside the frozen block
     # of the pick matrix — the point of comparing is comparing against yours.
     users = (
