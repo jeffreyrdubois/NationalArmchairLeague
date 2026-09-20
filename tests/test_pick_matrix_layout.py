@@ -1,4 +1,10 @@
-"""The all-picks matrix keeps the viewer's own column in the frozen block.
+"""The all-picks page puts the matrix first, in the order games matter.
+
+The matrix of who picked which team leads the page, ahead of the week
+standings, and its rows run live games first, then the ones still to kick off,
+then the finals — so the rows that can still change are the ones on screen.
+
+Also: the matrix keeps the viewer's own column in the frozen block.
 
 The table is wider than a phone, so the first four columns (game, spread,
 result and the viewer's own picks) are frozen while the rest scroll sideways.
@@ -104,6 +110,86 @@ def test_the_viewers_column_is_the_frozen_one():
         assert names.count("You") == 1, f"more than one column is labelled You: {names}"
         # Every other player is still there, just after the frozen block.
         assert len(names) == 3, f"players went missing from the header: {names}"
+
+
+def build_week_of_mixed_games():
+    """One locked week whose games are live, upcoming and finished in turn.
+
+    They are added in kickoff order, so any grouping the page does has to be
+    its own doing rather than an accident of the schedule.
+    """
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    db = SessionLocal()
+    season = Season(year=2032, is_active=True)
+    db.add(season)
+    db.flush()
+
+    kickoff = datetime.utcnow() - timedelta(hours=6)
+    week = Week(
+        season_id=season.id, week_number=1, label="Week 1",
+        first_kickoff=kickoff, is_picks_locked=True,
+    )
+    db.add(week)
+    db.flush()
+
+    # (away, home, hours after the first kickoff, state)
+    schedule = [
+        ("DON", "EAR", 0, "final"),
+        ("UPA", "UPB", 5, "upcoming"),
+        ("LIV", "ONE", 1, "live"),
+        ("FIN", "TWO", 2, "final"),
+        ("LIV", "TWO", 3, "live"),
+        ("UPC", "UPD", 4, "upcoming"),
+    ]
+    for away, home, offset, state in schedule:
+        db.add(Game(
+            week_id=week.id, home_team=home, away_team=away,
+            kickoff_time=kickoff + timedelta(hours=offset), spread=-3.0,
+            is_final=(state == "final"), is_in_progress=(state == "live"),
+            home_score=20 if state != "upcoming" else None,
+            away_score=17 if state != "upcoming" else None,
+        ))
+
+    viewer = User(first_name="Vic", last_name="Viewer", email="v@x.com",
+                  password_hash="x", role=Role.player)
+    db.add(viewer)
+    db.commit()
+
+    ids = {"week": week.id, "viewer": viewer.id}
+    db.close()
+    return ids
+
+
+def matchups_in_order(html):
+    """The away@home matchups down the matrix, top to bottom."""
+    body = html.split("<!-- Pick matrix -->", 1)[1].split("<tbody>", 1)[1]
+    body = body.split("</tbody>", 1)[0]
+    return re.findall(
+        r'<span class="text-gray-500[^"]*">([A-Z]{3})</span>\s*'
+        r'<span class="text-gray-400[^"]*">@</span>\s*'
+        r'<span class="font-medium[^"]*">([A-Z]{3})</span>',
+        body,
+    )
+
+
+def test_live_games_lead_then_upcoming_then_finals():
+    ids = build_week_of_mixed_games()
+    html = client_for(ids["viewer"]).get(f"/picks/week/{ids['week']}/all").text
+    order = matchups_in_order(html)
+    assert order == [
+        ("LIV", "ONE"), ("LIV", "TWO"),   # live, in kickoff order
+        ("UPC", "UPD"), ("UPA", "UPB"),   # then upcoming, in kickoff order
+        ("DON", "EAR"), ("FIN", "TWO"),   # then the finals
+    ], f"the matrix is not grouped live, upcoming, final: {order}"
+
+
+def test_the_matrix_comes_before_the_week_standings():
+    ids = build_league()
+    html = client_for(ids["mira"]).get(f"/picks/week/{ids['week']}/all").text
+    assert html.index("<!-- Pick matrix -->") < html.index("<!-- Week standings -->"), \
+        "the week standings are still above the pick matrix"
 
 
 def test_the_frozen_columns_and_header_are_marked_up():
