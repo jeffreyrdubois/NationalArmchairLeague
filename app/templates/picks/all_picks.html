@@ -161,8 +161,12 @@
             <span class="text-[9px] sm:text-xs whitespace-nowrap {% if game.home_covered %}text-green-600{% else %}text-blue-600{% endif %}">
               {{ game.home_team if game.home_covered else game.away_team }}<span class="hidden sm:inline"> covered</span><span class="sm:hidden"> &#10003;</span>
             </span>
-          {% elif game.is_in_progress %}
-            <span class="text-[9px] sm:text-xs live-pulse text-green-600">{{ game.away_score }}-{{ game.home_score }} LIVE</span>
+          {% elif game.is_underway %}
+            <span class="text-[9px] sm:text-xs live-pulse text-green-600">
+              {% if game.home_score is not none and game.away_score is not none %}
+                {{ game.away_score }}-{{ game.home_score }} LIVE
+              {% else %}LIVE{% endif %}
+            </span>
           {% else %}
             <span class="text-[9px] sm:text-xs text-gray-400">Upcoming</span>
           {% endif %}
@@ -243,7 +247,7 @@
   </div>
 </div>
 
-{% if games|selectattr("is_in_progress")|list %}
+{% if games|selectattr("is_underway")|list %}
 <script>setTimeout(() => window.location.reload(), 60000);</script>
 {% endif %}
 {% endif %}
