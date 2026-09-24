@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Season, Week, Game, Pick, User, PushSubscription, Transaction, AppSetting
 from app.auth import get_current_user, verify_password, hash_password
+from app.services import mcp_tokens
 from app.services.scoring import get_week_standings, get_season_standings
 from app.services.visibility import (
     can_see_picks,
@@ -245,15 +246,24 @@ async def user_profile(
     )
 
 
-@router.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request, db: Session = Depends(get_db)):
-    user = get_current_user(request, db)
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
+def _public_url(request: Request, path: str) -> str:
+    """An absolute URL as the outside world reaches this app.
 
+    Behind the reverse proxy the app itself is spoken to over plain http, so
+    the scheme the browser actually used comes from X-Forwarded-Proto.
+    """
+    url = request.base_url
+    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+    if proto in ("http", "https"):
+        url = url.replace(scheme=proto)
+    return str(url).rstrip("/") + path
+
+
+def _render_settings(request: Request, db: Session, user: User, new_mcp_token: str = None):
     subscriptions = db.query(PushSubscription).filter(PushSubscription.user_id == user.id).all()
     msg = request.query_params.get("msg")
     error = request.query_params.get("error")
+    may_use_mcp = mcp_tokens.may_hold_token(user)
     return templates.TemplateResponse(
         "account/settings.html",
         {
@@ -262,8 +272,45 @@ async def settings_page(request: Request, db: Session = Depends(get_db)):
             "subscriptions": subscriptions,
             "msg": msg,
             "error": error,
+            "may_use_mcp": may_use_mcp,
+            "mcp_token": mcp_tokens.get_token(db, user) if may_use_mcp else None,
+            "new_mcp_token": new_mcp_token,
+            "mcp_url": _public_url(request, "/mcp"),
         },
     )
+
+
+@router.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return _render_settings(request, db, user)
+
+
+@router.post("/settings/mcp-token", response_class=HTMLResponse)
+async def issue_mcp_token(request: Request, db: Session = Depends(get_db)):
+    """Issue (or replace) the caller's MCP token.
+
+    Rendered straight back rather than redirected: the token is readable this
+    once and never again, and it must not travel in a URL.
+    """
+    user = get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    if not mcp_tokens.may_hold_token(user):
+        return RedirectResponse(url="/settings?error=Claude+access+is+not+available+for+your+account", status_code=303)
+    token = mcp_tokens.issue_token(db, user)
+    return _render_settings(request, db, user, new_mcp_token=token)
+
+
+@router.post("/settings/mcp-token/revoke")
+async def revoke_mcp_token(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    mcp_tokens.revoke_token(db, user)
+    return RedirectResponse(url="/settings?msg=Claude+access+token+revoked", status_code=303)
 
 
 @router.post("/settings/notifications")

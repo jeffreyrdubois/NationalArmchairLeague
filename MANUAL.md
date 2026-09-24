@@ -12,6 +12,7 @@
 9. [Money — Prize Payouts & League Funds](#9-money--prize-payouts--league-funds)
 10. [Submitting an Issue](#10-submitting-an-issue)
 11. [Configuration — Environment Variables](#11-configuration--environment-variables)
+12. [Using the League from Claude (MCP)](#12-using-the-league-from-claude-mcp)
 
 ---
 
@@ -525,6 +526,51 @@ affected until you install it. To go back afterwards, install `latest` again.
 
 ---
 
+## 12. Using the League from Claude (MCP)
+
+The app runs an [MCP](https://modelcontextprotocol.io) server at `/mcp`, so
+Claude can answer questions about the league and fill in your picks. For now it
+is **admins only**.
+
+### Connecting
+
+1. Go to **Account Settings** (`/settings`) → **Claude Access (MCP)** →
+   **Create Access Token**. The token is shown **once** — copy it then. Only a
+   hash is stored, so a lost token is replaced, not recovered.
+2. Add the server to Claude:
+   - **claude.ai / Claude app:** Settings → Connectors → *Add custom connector*,
+     and paste the **Connector URL** shown on the settings page
+     (`https://your-nal-host/mcp?token=nal_…`).
+   - **Claude Code:** run the command shown on the settings page:
+     `claude mcp add --transport http nal https://your-nal-host/mcp --header "Authorization: Bearer nal_…"`
+
+The server has to be reachable from wherever Claude runs — for claude.ai that
+means the public address behind your reverse proxy, not the LAN one. The SWAG
+config in `nginx/` needs no changes.
+
+**Replace Token** issues a new one and kills the old; **Revoke** removes
+access entirely. A token also stops working the moment its owner is
+deactivated or stops being an admin. Treat the connector URL like a password:
+it carries the token, and URLs end up in proxy logs.
+
+### What Claude can do
+
+| Tool | What it answers |
+|---|---|
+| `get_week_results` | A week's scores, who covered, your pick on each game, and the week's leaderboard. Defaults to the latest locked week. |
+| `get_season_standings` | The season leaderboard, with points behind the leader and weeks won. |
+| `get_award_standings` | Each award's rules, prize, leaders and your place. |
+| `get_money_owed` | Prize money each player is owed (earned minus paid, plus season-end projections) and unpaid entry fees. |
+| `get_pick_sheet` | The open week's games, spreads and kickoffs, your current picks, and unused point values. |
+| `submit_picks` | Enter or change picks. Teams can be named by abbreviation or name (`"KC"`, `"Chiefs"`); games you leave out keep their current pick. |
+
+Claude acts as **you** and follows the same rules the site does: nobody's
+picks — yours excepted — are visible before a week locks, picks can't be
+changed once it has, and every point value is used once. A submission that
+breaks any rule saves nothing.
+
+---
+
 ## Quick Reference
 
 | Page | URL | Who |
@@ -534,6 +580,7 @@ affected until you install it. To go back afterwards, install `latest` again.
 | All Picks (after lock) / Pick Status (before) | `/picks/week/{id}/all` | All |
 | Standings | `/standings` | All |
 | Submit an Issue | `/feedback` | All |
+| Account Settings (incl. Claude access) | `/settings` | All (Claude access: Admin) |
 | Spreads | `/admin/spreads` | Contributor+ |
 | Scores | `/admin/scores` | Contributor+ |
 | Admin Panel | `/admin/` | Admin |

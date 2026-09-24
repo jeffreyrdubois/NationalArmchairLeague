@@ -85,6 +85,61 @@
     {% endif %}
   </div>
 
+  {% if may_use_mcp %}
+  <!-- ── Claude (MCP) access ── -->
+  <div class="bg-white rounded-xl shadow p-5 lg:col-span-2">
+    <h2 class="font-semibold text-base mb-1">Claude Access (MCP)</h2>
+    <p class="text-xs text-gray-500 mb-4">
+      Lets Claude read the league &mdash; weekly results, standings, awards, and
+      who is owed money &mdash; and fill in your picks. It acts as you and sees
+      only what you can see here. Add it to Claude as a custom connector.
+    </p>
+
+    {% if new_mcp_token %}
+    <div class="border border-yellow-300 bg-yellow-50 rounded p-3 mb-4">
+      <div class="text-sm font-medium mb-1">Copy this now &mdash; it will not be shown again.</div>
+      <div class="text-xs text-gray-500 mb-1">Access token</div>
+      <input type="text" readonly value="{{ new_mcp_token }}" onclick="this.select()"
+        class="w-full border rounded px-2 py-1 text-xs font-mono bg-white mb-2" />
+      <div class="text-xs text-gray-500 mb-1">
+        Connector URL (for clients that only take a URL, such as claude.ai)
+      </div>
+      <input type="text" readonly value="{{ mcp_url }}?token={{ new_mcp_token }}" onclick="this.select()"
+        class="w-full border rounded px-2 py-1 text-xs font-mono bg-white mb-2" />
+      <div class="text-xs text-gray-500 mb-1">Claude Code</div>
+      <input type="text" readonly onclick="this.select()"
+        value='claude mcp add --transport http nal {{ mcp_url }} --header "Authorization: Bearer {{ new_mcp_token }}"'
+        class="w-full border rounded px-2 py-1 text-xs font-mono bg-white" />
+    </div>
+    {% endif %}
+
+    {% if mcp_token %}
+    <p class="text-sm mb-3">
+      Token <span class="font-mono">{{ mcp_token.token_prefix }}&hellip;</span>
+      issued {{ mcp_token.created_at.strftime('%b %-d, %Y') if mcp_token.created_at else '' }}
+      &mdash;
+      {% if mcp_token.last_used_at %}last used {{ (mcp_token.last_used_at | eastern).strftime('%b %-d, %Y at %-I:%M %p ET') }}{% else %}not used yet{% endif %}.
+    </p>
+    <div class="flex gap-2 flex-wrap">
+      <form method="post" action="/settings/mcp-token"
+        onsubmit="return confirm('Replace your token? Anything using the current one will stop working.');">
+        <button class="bg-gray-900 text-white text-sm px-4 py-2 rounded hover:bg-gray-700">Replace Token</button>
+      </form>
+      <form method="post" action="/settings/mcp-token/revoke"
+        onsubmit="return confirm('Revoke your token? Claude will lose access until you issue a new one.');">
+        <button class="bg-gray-200 text-gray-700 text-sm px-4 py-2 rounded hover:bg-gray-300">Revoke</button>
+      </form>
+    </div>
+    {% else %}
+    <form method="post" action="/settings/mcp-token">
+      <button class="bg-yellow-400 text-gray-900 text-sm px-4 py-2 rounded font-medium hover:bg-yellow-300">
+        Create Access Token
+      </button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <!-- ── Change Password ── -->
   <div class="bg-white rounded-xl shadow p-5 lg:col-span-2 max-w-lg">
     <h2 class="font-semibold text-base mb-4">Change Password</h2>

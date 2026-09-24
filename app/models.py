@@ -385,3 +385,25 @@ class PayoutRule(Base):
     __table_args__ = (UniqueConstraint("plan_id", "category", "award_id", "rank"),)
 
     plan = relationship("PayoutPlan", back_populates="rules")
+
+
+class McpToken(Base):
+    """A personal access token for the league's MCP server (``/mcp``).
+
+    It stands in for a login cookie when Claude, rather than a browser, is the
+    one asking — so it acts as exactly one user and sees exactly what they
+    would. Only a SHA-256 of the token is kept: the token itself is shown once,
+    when it is issued, and a lost one is replaced rather than recovered.
+    """
+    __tablename__ = "mcp_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    # The first few characters, so the settings page can say which token is
+    # live without being able to reproduce it.
+    token_prefix = Column(String(12), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    last_used_at = Column(DateTime)
+
+    user = relationship("User")
