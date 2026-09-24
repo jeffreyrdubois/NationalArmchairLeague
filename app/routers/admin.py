@@ -1482,17 +1482,7 @@ async def funds_page(request: Request, db: Session = Depends(get_db)):
     # Recomputed on every load rather than stored, so editing the plan moves
     # these numbers for weeks that have already been played.
     season = db.query(Season).filter(Season.is_active == True).first()  # noqa: E712
-    plan = payouts.load_plan(db, season.id) if season else payouts.Plan()
-    report = payouts.compute_payouts(db, season, plan) if season else payouts.PayoutReport(plan)
-    # Somebody who has left the league can still be owed for a week they won,
-    # so the ledger covers anyone with money on either side of it.
-    ledger_users = list(users)
-    known = {u.id for u in ledger_users}
-    for line in report.lines:
-        if line.user.id not in known:
-            ledger_users.append(line.user)
-            known.add(line.user.id)
-    ledger = payouts.payout_ledger(db, report, ledger_users)
+    plan, report, ledger = payouts.league_ledger(db, season, users)
     total_owed = round(sum(row["owed"] for row in ledger if row["owed"] > 0), 2)
 
     return templates.TemplateResponse("admin/funds.html", {

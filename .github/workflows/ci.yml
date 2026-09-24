@@ -94,3 +94,10 @@ jobs:
       # back, and that a tag from a form can never become an image name.
       - name: Test the in-app updater
         run: python tests/test_selfupdate.py
+
+      # The MCP server is a second way into the league, and the one rule it
+      # must not bend is the site's: nobody reads anyone's picks before the
+      # lock. These speak real MCP to /mcp and check that, that a token is the
+      # only way in, and that picks entered through it obey the pick sheet.
+      - name: Test the MCP server
+        run: python tests/test_mcp.py

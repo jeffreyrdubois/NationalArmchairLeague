@@ -46,3 +46,19 @@ def ordinal(n: int) -> str:
     if 10 <= (n % 100) <= 20:
         return f"{n}th"
     return f"{n}{_ORDINAL_SUFFIX.get(n % 10, 'th')}"
+
+
+def public_url(request, path: str) -> str:
+    """An absolute URL for ``path`` as the outside world reaches this app.
+
+    The Host header survives the reverse proxy, but the proxy speaks plain
+    http to the app, so the scheme the client actually used comes from
+    X-Forwarded-Proto. Used wherever a URL is handed to something outside the
+    browser — the OAuth metadata Claude reads, the settings page's copy/paste
+    values.
+    """
+    url = request.base_url
+    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+    if proto in ("http", "https"):
+        url = url.replace(scheme=proto)
+    return str(url).rstrip("/") + path

@@ -1,14 +1,16 @@
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse
+from starlette.routing import Route
 from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
 import os
 
 from app.database import init_db
+from app.mcp_server import create_endpoint as create_mcp_endpoint, mcp
 from app.routers import auth, picks, dashboard, admin, awards
-from app.routers import push, feedback
+from app.routers import push, feedback, oauth
 from app.services.scheduler import setup_scheduler, scheduler
 from app.services.notifications import init_vapid_keys
 from app.templates_config import templates
@@ -23,7 +25,8 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized")
     init_vapid_keys()
     setup_scheduler()
-    yield
+    async with mcp.session_manager.run():
+        yield
     scheduler.shutdown()
     logger.info("Scheduler shut down")
 
@@ -41,6 +44,14 @@ app.include_router(admin.router)
 app.include_router(awards.router)
 app.include_router(push.router)
 app.include_router(feedback.router)
+app.include_router(oauth.router)
+
+# The MCP server (see app/mcp_server.py). A plain route rather than a mount, so
+# the endpoint is exactly /mcp — a mount would redirect POST /mcp to /mcp/,
+# which MCP clients do not all follow.
+app.router.routes.append(
+    Route("/mcp", endpoint=create_mcp_endpoint(), methods=["GET", "POST", "DELETE"])
+)
 
 
 # Build metadata, baked in by the publish workflow (see .github/workflows/

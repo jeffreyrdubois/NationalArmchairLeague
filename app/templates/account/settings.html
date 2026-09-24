@@ -3,6 +3,11 @@
 
 {% block content %}
 <h1 class="text-2xl font-bold mb-6">Account Settings</h1>
+{# The page-level banner reads the query string; a problem found while
+   rendering straight back (a bad redirect URI) arrives in the context. #}
+{% if error and not request.query_params.get('error') %}
+<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4 text-sm">{{ error }}</div>
+{% endif %}
 
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -84,6 +89,105 @@
     </div>
     {% endif %}
   </div>
+
+  {% if may_use_mcp %}
+  <!-- ── Claude (MCP) access ── -->
+  <div class="bg-white rounded-xl shadow p-5 lg:col-span-2">
+    <h2 class="font-semibold text-base mb-1">Claude Access (MCP)</h2>
+    <p class="text-xs text-gray-500 mb-3">
+      Lets Claude read the league &mdash; results, everyone's picks once a week
+      locks, standings, awards and league money &mdash; and fill in your picks.
+      Add it to Claude as a custom connector with the server URL, client ID and
+      client secret below; Claude then sends you here to log in and approve it,
+      and acts as whoever approved it.
+    </p>
+    <div class="text-xs text-gray-500 mb-1">Server URL</div>
+    <input type="text" readonly value="{{ mcp_url }}" onclick="this.select()"
+      class="w-full border rounded px-2 py-1 text-xs font-mono bg-gray-50 mb-4" />
+
+    {% if new_secret %}
+    <div class="border border-yellow-300 bg-yellow-50 rounded p-3 mb-4">
+      <div class="text-sm font-medium mb-2">
+        Copy the client secret now &mdash; it will not be shown again.
+      </div>
+      <div class="text-xs text-gray-500 mb-1">Client ID</div>
+      <input type="text" readonly value="{{ new_client.client_id }}" onclick="this.select()"
+        class="w-full border rounded px-2 py-1 text-xs font-mono bg-white mb-2" />
+      <div class="text-xs text-gray-500 mb-1">Client secret</div>
+      <input type="text" readonly value="{{ new_secret }}" onclick="this.select()"
+        class="w-full border rounded px-2 py-1 text-xs font-mono bg-white mb-2" />
+      <div class="text-xs text-gray-500 mb-1">
+        Claude Code (asks for the secret when you run it)
+      </div>
+      <input type="text" readonly onclick="this.select()"
+        value="claude mcp add --transport http --client-id {{ new_client.client_id }} --client-secret nal {{ mcp_url }}"
+        class="w-full border rounded px-2 py-1 text-xs font-mono bg-white" />
+    </div>
+    {% endif %}
+
+    {% for row in mcp_clients %}
+    {% set client = row.client %}
+    <div class="border rounded p-3 mb-3">
+      <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+        <div>
+          <span class="font-medium text-sm">{{ client.name }}</span>
+          <span class="text-xs font-mono text-gray-500 ml-2">{{ client.client_id }}</span>
+        </div>
+        <div class="text-xs text-gray-500">
+          {{ row.connections }} connected app{{ '' if row.connections == 1 else 's' }}
+          {% if client.last_used_at %}
+          &middot; last token {{ (client.last_used_at | eastern).strftime('%b %-d, %-I:%M %p ET') }}
+          {% endif %}
+        </div>
+      </div>
+      <form method="post" action="/settings/mcp-clients/{{ client.id }}/redirects" class="mb-2">
+        <label class="block text-xs text-gray-500 mb-1">Redirect URIs (one per line)</label>
+        <textarea name="redirect_uris" rows="4"
+          class="w-full border rounded px-2 py-1 text-xs font-mono">{{ client.redirect_uris }}</textarea>
+        <button class="mt-1 bg-gray-200 text-gray-700 text-xs px-3 py-1 rounded hover:bg-gray-300">
+          Save Redirect URIs
+        </button>
+      </form>
+      <div class="flex gap-2 flex-wrap">
+        <form method="post" action="/settings/mcp-clients/{{ client.id }}/rotate"
+          onsubmit="return confirm('Issue a new secret? Claude will need the new one the next time it signs in.');">
+          <button class="bg-gray-900 text-white text-xs px-3 py-1.5 rounded hover:bg-gray-700">New Secret</button>
+        </form>
+        <form method="post" action="/settings/mcp-clients/{{ client.id }}/disconnect"
+          onsubmit="return confirm('Sign out every app connected with this client?');">
+          <button class="bg-gray-200 text-gray-700 text-xs px-3 py-1.5 rounded hover:bg-gray-300">Disconnect All</button>
+        </form>
+        <form method="post" action="/settings/mcp-clients/{{ client.id }}/delete"
+          onsubmit="return confirm('Delete this client? Anything using it stops working.');">
+          <button class="bg-red-100 text-red-700 text-xs px-3 py-1.5 rounded hover:bg-red-200">Delete</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+
+    <details {% if not mcp_clients %}open{% endif %} class="mt-2">
+      <summary class="text-sm font-medium cursor-pointer">Create a client</summary>
+      <form method="post" action="/settings/mcp-clients" class="mt-2 space-y-2">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Name</label>
+          <input type="text" name="name" value="Claude" maxlength="100"
+            class="w-full border rounded px-2 py-1 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Redirect URIs (one per line)</label>
+          <textarea name="redirect_uris" rows="4"
+            class="w-full border rounded px-2 py-1 text-xs font-mono">{{ default_redirect_uris }}</textarea>
+          <p class="text-xs text-gray-400 mt-1">
+            The defaults cover claude.ai, the Claude apps and Claude Code.
+          </p>
+        </div>
+        <button class="bg-yellow-400 text-gray-900 text-sm px-4 py-2 rounded font-medium hover:bg-yellow-300">
+          Create Client
+        </button>
+      </form>
+    </details>
+  </div>
+  {% endif %}
 
   <!-- ── Change Password ── -->
   <div class="bg-white rounded-xl shadow p-5 lg:col-span-2 max-w-lg">

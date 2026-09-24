@@ -27,6 +27,17 @@ def game_sort_key(game: Game):
     return 1
 
 
+# A full slate of 16 games is worth 1-16. A short week drops the lowest values
+# rather than the highest, so the top pick is always worth 16:
+# 15 games -> 2-16, 14 games -> 3-16.
+MAX_CONFIDENCE_POINTS = 16
+
+
+def available_points_for(n_games: int) -> list[int]:
+    """The confidence values a week with ``n_games`` games hands out."""
+    return list(range(MAX_CONFIDENCE_POINTS - n_games + 1, MAX_CONFIDENCE_POINTS + 1))
+
+
 def get_active_season_week(db: Session):
     season = db.query(Season).filter(Season.is_active == True).first()
     if not season:
@@ -49,10 +60,7 @@ def build_pick_context(db: Session, week: Week, user: User, admin_user_id: int =
         .all()
     )
     n_games = len(games)
-    # Available points: skip lowest values for short weeks
-    # 16 games -> 1-16, 15 games -> 2-16, 14 games -> 3-16
-    max_full = 16
-    available_points = list(range(max_full - n_games + 1, max_full + 1))
+    available_points = available_points_for(n_games)
 
     target_user_id = admin_user_id or user.id
     existing_picks = {
@@ -205,9 +213,7 @@ async def save_picks(
         raise HTTPException(status_code=400, detail="Picks are locked for this week")
 
     games = db.query(Game).filter(Game.week_id == week_id).all()
-    n_games = len(games)
-    max_full = 16
-    available_points = set(range(max_full - n_games + 1, max_full + 1))
+    available_points = set(available_points_for(len(games)))
 
     # Parse picks from form: format is "game_{game_id}_team" and "game_{game_id}_points"
     new_picks = {}

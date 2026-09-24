@@ -454,3 +454,23 @@ def payout_ledger(db: Session, report: PayoutReport, users: list[User]) -> list[
     # Whoever is owed the most first — this table exists to be worked down.
     ledger.sort(key=lambda r: (-r["owed"], r["user"].last_name, r["user"].first_name))
     return ledger
+
+
+def league_ledger(
+    db: Session, season: Season | None, users: list[User],
+) -> tuple[Plan, PayoutReport, list[dict]]:
+    """The active plan, what it pays, and who is still owed — for ``users``.
+
+    Somebody who has left the league can still be owed for a week they won, so
+    anyone the report pays is added to the ledger even when ``users`` (usually
+    the active players) leaves them out.
+    """
+    plan = load_plan(db, season.id) if season else Plan()
+    report = compute_payouts(db, season, plan) if season else PayoutReport(plan)
+    ledger_users = list(users)
+    known = {u.id for u in ledger_users}
+    for line in report.lines:
+        if line.user.id not in known:
+            ledger_users.append(line.user)
+            known.add(line.user.id)
+    return plan, report, payout_ledger(db, report, ledger_users)

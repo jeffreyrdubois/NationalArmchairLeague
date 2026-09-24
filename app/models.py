@@ -385,3 +385,52 @@ class PayoutRule(Base):
     __table_args__ = (UniqueConstraint("plan_id", "category", "award_id", "rank"),)
 
     plan = relationship("PayoutPlan", back_populates="rules")
+
+
+class OAuthClient(Base):
+    """An OAuth client allowed to connect Claude to the MCP server.
+
+    Created by an admin on the settings page; the client ID and secret are what
+    get pasted into Claude's custom-connector settings. Only a hash of the
+    secret is kept — it is shown once, and a lost one is replaced.
+    """
+    __tablename__ = "oauth_clients"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(String(64), unique=True, nullable=False, index=True)
+    secret_hash = Column(String(64), nullable=False)
+    name = Column(String(100), nullable=False)
+    # One per line. The authorize endpoint only ever sends a code back to one
+    # of these, which is what stops a stolen client ID being any use.
+    redirect_uris = Column(Text, nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    last_used_at = Column(DateTime)
+
+    created_by = relationship("User")
+
+    @property
+    def redirect_uri_list(self) -> list[str]:
+        return [u.strip() for u in (self.redirect_uris or "").splitlines() if u.strip()]
+
+
+class OAuthToken(Base):
+    """An authorization code, access token or refresh token (``kind``).
+
+    All three are stored as hashes and tied to the user who approved the
+    connection, so the MCP server answers as that person.
+    """
+    __tablename__ = "oauth_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    kind = Column(String(10), nullable=False)          # code | access | refresh
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    client_id = Column(String(64), ForeignKey("oauth_clients.client_id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    expires_at = Column(DateTime, nullable=False)       # naive UTC
+    # Authorization codes only: PKCE challenge and the redirect it was issued for.
+    code_challenge = Column(String(128))
+    redirect_uri = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    user = relationship("User")

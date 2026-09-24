@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Connect Claude &mdash; NAL{% endblock %}
+
+{% block content %}
+<div class="max-w-md mx-auto bg-white rounded-xl shadow p-6 mt-6">
+  {% if error %}
+  <h1 class="text-xl font-bold mb-3">Can't connect</h1>
+  <p class="text-sm text-gray-700">{{ error }}</p>
+  {% else %}
+  <h1 class="text-xl font-bold mb-3">Connect {{ client.name }}?</h1>
+  <p class="text-sm text-gray-700 mb-3">
+    <strong>{{ client.name }}</strong> is asking to use the league as
+    <strong>{{ user.full_name }}</strong>. It will be able to:
+  </p>
+  <ul class="text-sm text-gray-700 list-disc pl-5 mb-4 space-y-1">
+    <li>read results, standings, awards and league money</li>
+    <li>see everyone's picks once a week has locked &mdash; never before</li>
+    <li>enter and change your picks until the week locks</li>
+  </ul>
+  <p class="text-xs text-gray-500 mb-5">
+    You can disconnect it at any time from Account Settings.
+  </p>
+  <form method="post" action="/oauth/authorize" class="flex gap-2">
+    {% for key in ['client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method', 'scope', 'resource'] %}
+      {% if params.get(key) is not none %}
+      <input type="hidden" name="{{ key }}" value="{{ params[key] }}" />
+      {% endif %}
+    {% endfor %}
+    <button name="decision" value="allow"
+      class="bg-yellow-400 text-gray-900 text-sm px-4 py-2 rounded font-medium hover:bg-yellow-300">
+      Allow
+    </button>
+    <button name="decision" value="deny"
+      class="bg-gray-200 text-gray-700 text-sm px-4 py-2 rounded hover:bg-gray-300">
+      Deny
+    </button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
