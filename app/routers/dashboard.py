@@ -1,12 +1,13 @@
 from app.templates_config import templates
-from fastapi import APIRouter, Request, Depends, Form
+from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse
 
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Season, Week, Game, Pick, User, PushSubscription, Transaction, AppSetting
+from app.models import Season, Week, Game, Pick, User, PushSubscription, Transaction, AppSetting, OAuthClient
 from app.auth import get_current_user, verify_password, hash_password
-from app.services import mcp_tokens
+from app.services import oauth
+from app.utils import public_url
 from app.services.scoring import get_week_standings, get_season_standings
 from app.services.visibility import (
     can_see_picks,
@@ -246,24 +247,15 @@ async def user_profile(
     )
 
 
-def _public_url(request: Request, path: str) -> str:
-    """An absolute URL as the outside world reaches this app.
-
-    Behind the reverse proxy the app itself is spoken to over plain http, so
-    the scheme the browser actually used comes from X-Forwarded-Proto.
-    """
-    url = request.base_url
-    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
-    if proto in ("http", "https"):
-        url = url.replace(scheme=proto)
-    return str(url).rstrip("/") + path
-
-
-def _render_settings(request: Request, db: Session, user: User, new_mcp_token: str = None):
+def _render_settings(request: Request, db: Session, user: User, **extra):
     subscriptions = db.query(PushSubscription).filter(PushSubscription.user_id == user.id).all()
-    msg = request.query_params.get("msg")
-    error = request.query_params.get("error")
-    may_use_mcp = mcp_tokens.may_hold_token(user)
+    msg = extra.pop("msg", None) or request.query_params.get("msg")
+    error = extra.pop("error", None) or request.query_params.get("error")
+    may_use_mcp = oauth.may_use_mcp(user)
+    clients = []
+    if may_use_mcp:
+        for client in db.query(OAuthClient).order_by(OAuthClient.created_at).all():
+            clients.append({"client": client, "connections": oauth.connections(db, client)})
     return templates.TemplateResponse(
         "account/settings.html",
         {
@@ -273,9 +265,13 @@ def _render_settings(request: Request, db: Session, user: User, new_mcp_token: s
             "msg": msg,
             "error": error,
             "may_use_mcp": may_use_mcp,
-            "mcp_token": mcp_tokens.get_token(db, user) if may_use_mcp else None,
-            "new_mcp_token": new_mcp_token,
-            "mcp_url": _public_url(request, "/mcp"),
+            "mcp_clients": clients,
+            "mcp_url": public_url(request, "/mcp"),
+            "default_redirect_uris": "\n".join(oauth.DEFAULT_REDIRECT_URIS),
+            # Set only on the response that creates or rotates a secret — the
+            # one time it is readable.
+            "new_client": extra.get("new_client"),
+            "new_secret": extra.get("new_secret"),
         },
     )
 
@@ -288,29 +284,87 @@ async def settings_page(request: Request, db: Session = Depends(get_db)):
     return _render_settings(request, db, user)
 
 
-@router.post("/settings/mcp-token", response_class=HTMLResponse)
-async def issue_mcp_token(request: Request, db: Session = Depends(get_db)):
-    """Issue (or replace) the caller's MCP token.
+def _mcp_admin(request: Request, db: Session):
+    """The signed-in user if they may manage Claude connections, else None."""
+    user = get_current_user(request, db)
+    return user if oauth.may_use_mcp(user) else None
 
-    Rendered straight back rather than redirected: the token is readable this
+
+def _mcp_client(db: Session, client_pk: int) -> OAuthClient:
+    client = db.query(OAuthClient).filter(OAuthClient.id == client_pk).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return client
+
+
+@router.post("/settings/mcp-clients", response_class=HTMLResponse)
+async def create_mcp_client(
+    request: Request,
+    name: str = Form("Claude"),
+    redirect_uris: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """Create an OAuth client for Claude.
+
+    Rendered straight back rather than redirected: the secret is readable this
     once and never again, and it must not travel in a URL.
     """
-    user = get_current_user(request, db)
+    user = _mcp_admin(request, db)
     if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    if not mcp_tokens.may_hold_token(user):
-        return RedirectResponse(url="/settings?error=Claude+access+is+not+available+for+your+account", status_code=303)
-    token = mcp_tokens.issue_token(db, user)
-    return _render_settings(request, db, user, new_mcp_token=token)
+        return RedirectResponse(url="/settings", status_code=303)
+    try:
+        uris = oauth.parse_redirect_uris(redirect_uris)
+    except ValueError as exc:
+        return _render_settings(request, db, user, error=str(exc))
+    client, secret = oauth.create_client(db, user, name, uris)
+    return _render_settings(request, db, user, new_client=client, new_secret=secret)
 
 
-@router.post("/settings/mcp-token/revoke")
-async def revoke_mcp_token(request: Request, db: Session = Depends(get_db)):
-    user = get_current_user(request, db)
+@router.post("/settings/mcp-clients/{client_pk}/rotate", response_class=HTMLResponse)
+async def rotate_mcp_client_secret(request: Request, client_pk: int, db: Session = Depends(get_db)):
+    user = _mcp_admin(request, db)
     if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    mcp_tokens.revoke_token(db, user)
-    return RedirectResponse(url="/settings?msg=Claude+access+token+revoked", status_code=303)
+        return RedirectResponse(url="/settings", status_code=303)
+    client = _mcp_client(db, client_pk)
+    secret = oauth.rotate_secret(db, client)
+    return _render_settings(request, db, user, new_client=client, new_secret=secret)
+
+
+@router.post("/settings/mcp-clients/{client_pk}/redirects")
+async def update_mcp_client_redirects(
+    request: Request,
+    client_pk: int,
+    redirect_uris: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = _mcp_admin(request, db)
+    if not user:
+        return RedirectResponse(url="/settings", status_code=303)
+    client = _mcp_client(db, client_pk)
+    try:
+        client.redirect_uris = "\n".join(oauth.parse_redirect_uris(redirect_uris))
+    except ValueError as exc:
+        return _render_settings(request, db, user, error=str(exc))
+    db.commit()
+    return RedirectResponse(url="/settings?msg=Redirect+URIs+saved", status_code=303)
+
+
+@router.post("/settings/mcp-clients/{client_pk}/disconnect")
+async def disconnect_mcp_client(request: Request, client_pk: int, db: Session = Depends(get_db)):
+    user = _mcp_admin(request, db)
+    if not user:
+        return RedirectResponse(url="/settings", status_code=303)
+    oauth.disconnect_all(db, _mcp_client(db, client_pk))
+    return RedirectResponse(url="/settings?msg=Claude+disconnected", status_code=303)
+
+
+@router.post("/settings/mcp-clients/{client_pk}/delete")
+async def delete_mcp_client(request: Request, client_pk: int, db: Session = Depends(get_db)):
+    user = _mcp_admin(request, db)
+    if not user:
+        return RedirectResponse(url="/settings", status_code=303)
+    oauth.delete_client(db, _mcp_client(db, client_pk))
+    return RedirectResponse(url="/settings?msg=Client+deleted", status_code=303)
 
 
 @router.post("/settings/notifications")

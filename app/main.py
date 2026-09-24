@@ -10,7 +10,7 @@ import os
 from app.database import init_db
 from app.mcp_server import create_endpoint as create_mcp_endpoint, mcp
 from app.routers import auth, picks, dashboard, admin, awards
-from app.routers import push, feedback
+from app.routers import push, feedback, oauth
 from app.services.scheduler import setup_scheduler, scheduler
 from app.services.notifications import init_vapid_keys
 from app.templates_config import templates
@@ -44,6 +44,7 @@ app.include_router(admin.router)
 app.include_router(awards.router)
 app.include_router(push.router)
 app.include_router(feedback.router)
+app.include_router(oauth.router)
 
 # The MCP server (see app/mcp_server.py). A plain route rather than a mount, so
 # the endpoint is exactly /mcp — a mount would redirect POST /mcp to /mcp/,

@@ -529,45 +529,60 @@ affected until you install it. To go back afterwards, install `latest` again.
 ## 12. Using the League from Claude (MCP)
 
 The app runs an [MCP](https://modelcontextprotocol.io) server at `/mcp`, so
-Claude can answer questions about the league and fill in your picks. For now it
-is **admins only**.
+Claude can answer questions about the league and fill in your picks. Claude
+connects the standard way for a remote connector — OAuth with a client ID and
+client secret — and for now only **admins** can connect it.
 
 ### Connecting
 
 1. Go to **Account Settings** (`/settings`) → **Claude Access (MCP)** →
-   **Create Access Token**. The token is shown **once** — copy it then. Only a
-   hash is stored, so a lost token is replaced, not recovered.
+   **Create Client**. The redirect URIs are prefilled for claude.ai, the Claude
+   apps and Claude Code, so the defaults are right. The page then shows the
+   **Server URL**, **Client ID** and **Client secret**. The secret is shown
+   **once**, so copy it then. Only a hash is stored, and a lost secret is
+   replaced with **New Secret**, not recovered.
 2. Add the server to Claude:
-   - **claude.ai / Claude app:** Settings → Connectors → *Add custom connector*,
-     and paste the **Connector URL** shown on the settings page
-     (`https://your-nal-host/mcp?token=nal_…`).
-   - **Claude Code:** run the command shown on the settings page:
-     `claude mcp add --transport http nal https://your-nal-host/mcp --header "Authorization: Bearer nal_…"`
+   - **claude.ai / Claude app:** Settings → Connectors → *Add custom
+     connector*: paste the Server URL, and the Client ID and Client secret
+     (under the advanced settings).
+   - **Claude Code:** run the command shown on the settings page —
+     `claude mcp add --transport http --client-id nal_… --client-secret nal https://your-nal-host/mcp`
+     — and paste the secret when asked.
+3. Claude opens this site's **Connect Claude?** page. Log in if asked, then
+   click **Allow**. Claude acts as whoever approves it.
 
-The server has to be reachable from wherever Claude runs — for claude.ai that
-means the public address behind your reverse proxy, not the LAN one. The SWAG
+The server has to be reachable from wherever Claude runs. For claude.ai that
+means your public address behind the reverse proxy, not the LAN one. The SWAG
 config in `nginx/` needs no changes.
 
-**Replace Token** issues a new one and kills the old; **Revoke** removes
-access entirely. A token also stops working the moment its owner is
-deactivated or stops being an admin. Treat the connector URL like a password:
-it carries the token, and URLs end up in proxy logs.
+Access tokens last an hour and are renewed automatically. A connection that
+sits unused for 90 days has to be approved again. **Disconnect All** signs out
+every app using a client, and **Delete** removes the client entirely. Access
+also stops the moment the approving account is deactivated or stops being an
+admin.
 
 ### What Claude can do
 
 | Tool | What it answers |
 |---|---|
 | `get_week_results` | A week's scores, who covered, your pick on each game, and the week's leaderboard. Defaults to the latest locked week. |
+| `get_week_picks` | **Everyone's** picks for a week, game by game, with results and total points on each side. Only once the week has locked. |
+| `get_rooting_guide` | For each unfinished game in a locked week, which team actually helps you, for the week and for the season. Your own pick isn't always the answer: if a rival has more points on that team than you, their cover hurts you. |
 | `get_season_standings` | The season leaderboard, with points behind the leader and weeks won. |
 | `get_award_standings` | Each award's rules, prize, leaders and your place. |
 | `get_money_owed` | Prize money each player is owed (earned minus paid, plus season-end projections) and unpaid entry fees. |
 | `get_pick_sheet` | The open week's games, spreads and kickoffs, your current picks, and unused point values. |
 | `submit_picks` | Enter or change picks. Teams can be named by abbreviation or name (`"KC"`, `"Chiefs"`); games you leave out keep their current pick. |
 
-Claude acts as **you** and follows the same rules the site does: nobody's
-picks — yours excepted — are visible before a week locks, picks can't be
-changed once it has, and every point value is used once. A submission that
-breaks any rule saves nothing.
+The rooting guide weighs each outcome by your gain minus each rival's gain.
+For the week, your rivals are everyone who can still finish ahead of you or
+behind you on the points left to play. For the season, they are the nearest
+players above and below you in the standings. It also lists the difference
+against every other player, so you can ask about anyone in particular.
+
+Claude follows the same rules the site does. Nobody's picks, yours excepted,
+are visible before a week locks. Picks can't be changed once it has. Every
+point value is used once. A submission that breaks any rule saves nothing.
 
 ---
 

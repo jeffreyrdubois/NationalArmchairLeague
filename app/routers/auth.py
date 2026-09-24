@@ -28,6 +28,17 @@ def _is_bootstrap(db: Session) -> bool:
     return db.query(User).count() == 0
 
 
+def safe_next(target: Optional[str]) -> Optional[str]:
+    """Where to go after logging in, if it is a page on this site.
+
+    Only a local path is accepted, so a crafted login link can't bounce
+    someone off to another site the moment they sign in.
+    """
+    if target and target.startswith("/") and not target.startswith("//") and "\\" not in target:
+        return target
+    return None
+
+
 def _lookup_invite(db: Session, code: str) -> Optional[Invite]:
     normalized = normalize_invite_code(code)
     if not normalized:
@@ -37,10 +48,13 @@ def _lookup_invite(db: Session, code: str) -> Optional[Invite]:
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, db: Session = Depends(get_db)):
+    next_url = safe_next(request.query_params.get("next"))
     user = get_current_user(request, db)
     if user:
-        return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("auth/login.html", {"request": request, "error": None})
+        return RedirectResponse(url=next_url or "/", status_code=303)
+    return templates.TemplateResponse(
+        "auth/login.html", {"request": request, "error": None, "next_url": next_url}
+    )
 
 
 @router.post("/login")
@@ -48,12 +62,15 @@ async def login(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
+    next: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
+    next_url = safe_next(next)
+
     def login_error(msg):
         return templates.TemplateResponse(
             "auth/login.html",
-            {"request": request, "error": msg},
+            {"request": request, "error": msg, "next_url": next_url},
             status_code=401,
         )
 
@@ -68,7 +85,7 @@ async def login(
     if not user.is_active:
         return login_error("Account is disabled")
     token = create_access_token(user.id)
-    response = RedirectResponse(url="/", status_code=303)
+    response = RedirectResponse(url=next_url or "/", status_code=303)
     response.set_cookie(
         "access_token",
         token,

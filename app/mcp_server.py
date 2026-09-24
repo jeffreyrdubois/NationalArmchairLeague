@@ -2,9 +2,10 @@
 
 Mounted on the main app at ``/mcp`` (Streamable HTTP, stateless, JSON
 responses — nothing to keep alive between calls, and nothing extra for the
-reverse proxy to buffer). Every request carries a personal access token issued
-from Account Settings, either as ``Authorization: Bearer <token>`` or as a
-``?token=`` query parameter for clients that can only be given a URL.
+reverse proxy to buffer). Every request carries an OAuth access token as
+``Authorization: Bearer <token>``; a request without one gets the 401 that
+points Claude at the OAuth metadata, and from there at the login-and-approve
+page (see app/routers/oauth.py).
 
 Each tool answers as the token's owner and follows the same rules the site
 does: nobody's picks are visible before a week locks except the caller's own,
@@ -31,10 +32,10 @@ from app.models import AppSetting, Game, Pick, Role, Season, Transaction, User, 
 from app.routers.picks import apply_picks, available_points_for
 from app.services import payouts, scoring
 from app.services.awards import AWARD_REGISTRY, compute_all_awards, rank_award
-from app.services.mcp_tokens import user_for_token
-from app.services.scoring import get_week_standings
+from app.services.oauth import user_for_access_token
+from app.services.scoring import compute_home_covered, get_week_standings
 from app.services.visibility import get_submission_status, picks_are_revealed
-from app.utils import to_eastern
+from app.utils import public_url, to_eastern
 
 INSTRUCTIONS = """\
 National Armchair League is a family NFL confidence-pick pool played against
@@ -47,8 +48,13 @@ to anyone else until then.
 Weeks are addressed by week_number within a season (1-18 regular season, 19+
 playoffs); season_year defaults to the active season. To fill in picks, call
 get_pick_sheet first, then submit_picks with a team and a point value per game.
-Times are US Eastern.
+
+Once a week locks, get_week_picks shows everyone's picks. For "who should I
+root for", use get_rooting_guide: the side that helps the caller is not always
+the team they picked, since a rival may have more points on it. Times are US
+Eastern.
 """
+
 
 class _QuietStreamClose(logging.Filter):
     """Drop the SDK's "Error in message router" traceback for a closed stream.
@@ -84,25 +90,28 @@ def request_token(request: Request) -> str | None:
     scheme, _, value = auth.partition(" ")
     if scheme.lower() == "bearer" and value.strip():
         return value.strip()
-    return request.query_params.get("token") or None
+    return None
 
 
 class McpEndpoint:
-    """ASGI endpoint for ``/mcp``: refuse anything without a valid token
-    before the MCP machinery ever sees it."""
+    """ASGI endpoint for ``/mcp``: refuse anything without a valid access
+    token before the MCP machinery ever sees it."""
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         request = Request(scope, receive)
         db = SessionLocal()
         try:
-            user = user_for_token(db, request_token(request))
+            user = user_for_access_token(db, request_token(request))
         finally:
             db.close()
         if not user:
+            # RFC 9728: tell the client where to find out how to get a token.
+            metadata = public_url(request, "/.well-known/oauth-protected-resource/mcp")
             response = JSONResponse(
-                {"error": "A valid NAL access token is required."},
+                {"error": "invalid_token",
+                 "error_description": "Connect through OAuth to get an access token."},
                 status_code=401,
-                headers={"WWW-Authenticate": 'Bearer realm="nal-mcp"'},
+                headers={"WWW-Authenticate": f'Bearer resource_metadata="{metadata}"'},
             )
             await response(scope, receive, send)
             return
@@ -115,9 +124,9 @@ def create_endpoint() -> McpEndpoint:
 
 
 def _caller(db: Session, ctx: Context) -> User:
-    """The user the calling token acts as, re-checked on every tool call."""
+    """The user the calling access token acts as, re-checked on every call."""
     request = ctx.request_context.request
-    user = user_for_token(db, request_token(request)) if request else None
+    user = user_for_access_token(db, request_token(request)) if request else None
     if not user:
         raise ToolError("Not authenticated.")
     return user
@@ -530,6 +539,247 @@ def get_money_owed(
             "entry_fee": _money(entry_fee),
             "total_entry_fees_outstanding": _money(sum(f["still_owes"] for f in fees)),
             "entry_fees_outstanding": fees,
+        }
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Tools: everyone's picks, and who to root for
+# ---------------------------------------------------------------------------
+
+def _revealed_week(db: Session, season: Season, week_number: int | None) -> Week:
+    """A week whose picks everyone may see — refusing one that is still secret."""
+    if week_number is not None:
+        week = _week_by_number(db, season, week_number)
+    else:
+        locked = [w for w in _weeks(db, season) if picks_are_revealed(w)]
+        if not locked:
+            raise ToolError("No week's picks have been revealed yet.")
+        week = locked[-1]
+    if not picks_are_revealed(week):
+        raise ToolError(
+            f"{_week_label(week)} picks stay hidden until the first kickoff "
+            f"({_eastern(week.first_kickoff) or 'time not set'}). "
+            "get_week_results shows who has submitted."
+        )
+    return week
+
+
+def _currently_covering(game: Game) -> str | None:
+    """Who would cover if the game ended on the current score."""
+    if game.is_final:
+        return _covering_team(game)
+    if not game.is_underway or game.spread is None:
+        return None
+    if game.home_score is None or game.away_score is None:
+        return None
+    covered = compute_home_covered(game.home_score, game.away_score, game.spread)
+    return game.home_team if covered else game.away_team
+
+
+@mcp.tool()
+def get_week_picks(
+    ctx: Context,
+    week_number: int | None = None,
+    season_year: int | None = None,
+) -> dict[str, Any]:
+    """Everyone's picks for a week, game by game, with each pick's result.
+
+    Only for weeks whose picks have locked (the first kickoff) — before that
+    they are secret, exactly as on the site. Defaults to the most recent
+    locked week.
+    """
+    db = SessionLocal()
+    try:
+        user = _caller(db, ctx)
+        season = _season(db, season_year)
+        week = _revealed_week(db, season, week_number)
+
+        by_game: dict[int, list[Pick]] = {}
+        for pick in db.query(Pick).filter(Pick.week_id == week.id):
+            by_game.setdefault(pick.game_id, []).append(pick)
+
+        games = []
+        for game in _week_games(db, week):
+            row = _game(game)
+            leaning = _currently_covering(game)
+            if leaning and not game.is_final:
+                row["currently_covering"] = leaning
+            picks = sorted(
+                by_game.get(game.id, []),
+                key=lambda p: (-p.confidence_points, _name(p.user)),
+            )
+            row["picks"] = [
+                {
+                    "player": _name(p.user),
+                    "is_you": p.user_id == user.id,
+                    "team": p.picked_team,
+                    "points": p.confidence_points,
+                    "result": (
+                        "pending" if p.is_correct is None
+                        else "correct" if p.is_correct else "wrong"
+                    ),
+                }
+                for p in picks
+            ]
+            for team in (game.away_team, game.home_team):
+                row[f"points_on_{team}"] = sum(
+                    p.confidence_points for p in picks if p.picked_team == team
+                )
+            games.append(row)
+
+        return {
+            "season": season.year,
+            "week_number": week.week_number,
+            "week": _week_label(week),
+            "games": games,
+        }
+    finally:
+        db.close()
+
+
+def _outcome_net(deltas: dict[int, float], me: int, rivals: list[int]) -> float:
+    return sum(deltas.get(me, 0) - deltas.get(r, 0) for r in rivals)
+
+
+def _pick_side(nets: dict[str, float]) -> str:
+    (a, na), (b, nb) = nets.items()
+    if na == nb:
+        return "either"
+    return a if na > nb else b
+
+
+@mcp.tool()
+def get_rooting_guide(
+    ctx: Context,
+    week_number: int | None = None,
+) -> dict[str, Any]:
+    """Which team to root for in each unfinished game of a locked week.
+
+    Your pick is not always the side that helps you: if you took a team for 3
+    points and the people you are racing took it for 14, their cover hurts you.
+    For every game still to be decided this weighs both outcomes by what each
+    player gains, against the players you are actually racing:
+
+    - week: everyone whose race with you for the week is still live (either of
+      you can still finish ahead on points remaining);
+    - season: the nearest player(s) ahead of and behind you in the standings.
+
+    ``net_vs`` gives your gain minus theirs for each outcome, per player, so
+    any other rival can be weighed too.
+    """
+    db = SessionLocal()
+    try:
+        me = _caller(db, ctx)
+        season = _season(db, None)
+        week = _revealed_week(db, season, week_number)
+
+        week_rows = {r["user"].id: r for r in get_week_standings(db, week.id) if r["user"]}
+        season_rows = [r for r in scoring.get_season_standings(db, season.id) if r["user"]]
+        names = {uid: _name(r["user"]) for uid, r in week_rows.items()}
+        names.update({r["user"].id: _name(r["user"]) for r in season_rows})
+        if me.id not in week_rows:
+            raise ToolError(f"You have no picks in {_week_label(week)}.")
+
+        # --- the week race: who can still finish either side of you ---
+        mine = week_rows[me.id]
+        week_rivals = [
+            uid for uid, r in week_rows.items()
+            if uid != me.id
+            and r["potential"] >= mine["total"]
+            and mine["potential"] >= r["total"]
+        ]
+
+        # --- the season race: your nearest neighbours in the standings ---
+        season_total = {r["user"].id: r["total"] for r in season_rows}
+        my_season = season_total.get(me.id, 0)
+        ahead = [t for uid, t in season_total.items() if uid != me.id and t >= my_season]
+        behind = [t for uid, t in season_total.items() if uid != me.id and t < my_season]
+        season_rivals = [
+            uid for uid, t in season_total.items()
+            if uid != me.id and (
+                (ahead and t == min(ahead)) or (behind and t == max(behind))
+            )
+        ]
+
+        picks_by_game: dict[int, dict[int, Pick]] = {}
+        for pick in db.query(Pick).filter(Pick.week_id == week.id):
+            picks_by_game.setdefault(pick.game_id, {})[pick.user_id] = pick
+
+        games = []
+        for game in _week_games(db, week):
+            if game.is_final:
+                continue
+            picks = picks_by_game.get(game.id, {})
+            outcomes = {}
+            deltas_by_team = {}
+            for team in (game.away_team, game.home_team):
+                deltas = {
+                    uid: float(p.confidence_points) if p.picked_team == team else 0.0
+                    for uid, p in picks.items()
+                }
+                deltas_by_team[team] = deltas
+                outcomes[team] = {
+                    "you_gain": deltas.get(me.id, 0.0),
+                    "net_vs": {
+                        names.get(uid, "Unknown"): deltas.get(me.id, 0.0) - d
+                        for uid, d in sorted(deltas.items())
+                        if uid != me.id
+                    },
+                }
+            week_net = {
+                t: _outcome_net(d, me.id, week_rivals) for t, d in deltas_by_team.items()
+            }
+            season_net = {
+                t: _outcome_net(d, me.id, season_rivals) for t, d in deltas_by_team.items()
+            }
+            your = picks.get(me.id)
+            row = _game(game)
+            leaning = _currently_covering(game)
+            if leaning:
+                row["currently_covering"] = leaning
+            row.update({
+                "your_pick": (
+                    {"team": your.picked_team, "points": your.confidence_points}
+                    if your else None
+                ),
+                "if_covers": outcomes,
+                "root_for_week": (
+                    _pick_side(week_net) if week_rivals
+                    else (your.picked_team if your else "either")
+                ),
+                "week_net_by_outcome": week_net,
+                "root_for_season": _pick_side(season_net) if season_rivals else "either",
+                "season_net_by_outcome": season_net,
+            })
+            row["root_against_your_own_pick"] = bool(
+                your and row["root_for_week"] not in (your.picked_team, "either")
+            )
+            games.append(row)
+
+        return {
+            "season": season.year,
+            "week_number": week.week_number,
+            "week": _week_label(week),
+            "you": {
+                "week_points": mine["total"],
+                "week_max_possible": mine["potential"],
+                "season_points": my_season,
+            },
+            "week_rivals": [
+                {
+                    "player": names[uid],
+                    "points": week_rows[uid]["total"],
+                    "max_possible": week_rows[uid]["potential"],
+                }
+                for uid in week_rivals
+            ],
+            "season_rivals": [
+                {"player": names[uid], "season_points": season_total[uid]}
+                for uid in season_rivals
+            ],
+            "games": games,
         }
     finally:
         db.close()

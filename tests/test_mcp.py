@@ -3,8 +3,9 @@
 These speak real MCP over HTTP to the real endpoint, the way Claude does, so
 they cover the three things that matter:
 
-1. **Nobody gets in without a token**, and a token only works while its owner
-   is someone who may hold one.
+1. **Nobody gets in without going through OAuth** — a registered client, its
+   secret, PKCE, and a person who may connect approving it — and a token only
+   works while that person still may.
 2. **Pick secrecy survives a new door.** Before a week locks, the results tool
    shows who has submitted, never what anyone picked — the same rule the site
    enforces in app/services/visibility.py.
@@ -14,12 +15,16 @@ they cover the three things that matter:
 
 Run with: python tests/test_mcp.py
 """
+import base64
+import hashlib
 import json
 import os
+import secrets
 import sys
 import tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from urllib.parse import parse_qsl, urlsplit
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # A scratch file, never a real database: the endpoint opens its own sessions.
@@ -34,11 +39,12 @@ from app.auth import create_access_token
 from app.database import Base, SessionLocal, engine
 from app.mcp_server import create_endpoint, mcp
 from app.models import (
-    AppSetting, Game, McpToken, PayoutPlan, PayoutRule, Pick, Role, Season,
+    AppSetting, Game, OAuthClient, PayoutPlan, PayoutRule, Pick, Role, Season,
     Transaction, User, Week,
 )
-from app.routers import dashboard
-from app.services import mcp_tokens
+from app.routers import dashboard, oauth as oauth_router
+from app.routers.auth import safe_next
+from app.services import oauth
 from app.services.scoring import update_game_results
 
 
@@ -50,6 +56,7 @@ async def lifespan(app):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(dashboard.router)
+app.include_router(oauth_router.router)
 app.router.routes.append(
     Route("/mcp", endpoint=create_endpoint(), methods=["GET", "POST", "DELETE"])
 )
@@ -57,6 +64,8 @@ app.router.routes.append(
 Base.metadata.create_all(bind=engine)
 
 _ids = iter(range(1, 10_000))
+
+CALLBACK = "https://claude.ai/api/mcp/auth_callback"
 
 
 # ---------------------------------------------------------------------------
@@ -191,47 +200,177 @@ def err(client, token, tool, **args):
 # ---------------------------------------------------------------------------
 
 def test_requests_without_a_valid_token_are_refused(client, ids):
-    assert rpc(client, None, "tools/list", raw=True).status_code == 401
-    assert rpc(client, "nal_not-a-real-token", "tools/list", raw=True).status_code == 401
+    resp = rpc(client, None, "tools/list", raw=True)
+    assert resp.status_code == 401
+    # The 401 is what starts Claude's OAuth discovery, so it has to say where.
+    challenge = resp.headers["www-authenticate"]
+    assert 'resource_metadata="http://testserver/.well-known/oauth-protected-resource/mcp"' in challenge
+    assert rpc(client, "not-a-real-token", "tools/list", raw=True).status_code == 401
 
 
-def test_settings_issues_a_token_once_and_stores_only_its_hash(client, ids):
+def test_discovery_metadata(client, ids):
+    resource = client.get("/.well-known/oauth-protected-resource/mcp").json()
+    assert resource["resource"] == "http://testserver/mcp"
+    assert resource["authorization_servers"] == ["http://testserver"]
+    # Behind the reverse proxy the scheme the outside world used comes through.
+    resource = client.get("/.well-known/oauth-protected-resource",
+                          headers={"X-Forwarded-Proto": "https"}).json()
+    assert resource["resource"] == "https://testserver/mcp"
+
+    server = client.get("/.well-known/oauth-authorization-server").json()
+    assert server["authorization_endpoint"] == "http://testserver/oauth/authorize"
+    assert server["token_endpoint"] == "http://testserver/oauth/token"
+    assert server["code_challenge_methods_supported"] == ["S256"]
+    assert "registration_endpoint" not in server
+
+
+def create_client_as_admin(client, ids):
+    """Create an OAuth client from the settings page; returns (id, secret)."""
     client.cookies.set("access_token", create_access_token(ids["admin"]))
-    page = client.post("/settings/mcp-token")
+    page = client.post("/settings/mcp-clients", data={
+        "name": "Claude",
+        "redirect_uris": "\n".join(oauth.DEFAULT_REDIRECT_URIS),
+    })
     client.cookies.clear()
-    assert page.status_code == 200
-    token = page.text.split('value="nal_', 1)[1].split('"', 1)[0]
-    token = "nal_" + token
+    assert page.status_code == 200, page.text
+    client_id = "nal_" + page.text.split('value="nal_', 1)[1].split('"', 1)[0]
+    secret = "nalsec_" + page.text.split('value="nalsec_', 1)[1].split('"', 1)[0]
+    return client_id, secret
 
+
+def pkce():
+    verifier = secrets.token_urlsafe(48)
+    digest = hashlib.sha256(verifier.encode()).digest()
+    return verifier, base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+def authorize(client, user_id, client_id, challenge,
+              redirect_uri=CALLBACK, decision="allow"):
+    """Log in as ``user_id``, open the approval page and answer it."""
+    params = {
+        "response_type": "code", "client_id": client_id,
+        "redirect_uri": redirect_uri, "state": "xyz",
+        "code_challenge": challenge, "code_challenge_method": "S256",
+    }
+    client.cookies.set("access_token", create_access_token(user_id))
+    page = client.get("/oauth/authorize", params=params)
+    if page.status_code != 200 or "Allow" not in page.text:
+        client.cookies.clear()
+        return page
+    resp = client.post("/oauth/authorize", data={**params, "decision": decision},
+                       follow_redirects=False)
+    client.cookies.clear()
+    return resp
+
+
+def code_from(resp):
+    assert resp.status_code == 303, resp.text
+    query = dict(parse_qsl(urlsplit(resp.headers["location"]).query))
+    assert query["state"] == "xyz"
+    return query
+
+
+def connect(client, ids, client_id, secret):
+    """The whole flow Claude runs; returns the token response."""
+    verifier, challenge = pkce()
+    code = code_from(authorize(client, ids["admin"], client_id, challenge))["code"]
+    resp = client.post("/oauth/token", data={
+        "grant_type": "authorization_code", "code": code,
+        "redirect_uri": CALLBACK, "code_verifier": verifier,
+        "client_id": client_id, "client_secret": secret,
+    })
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_full_oauth_flow_connects_claude(client, ids):
+    client_id, secret = create_client_as_admin(client, ids)
+
+    # Only a hash of the secret is kept.
     db = SessionLocal()
-    row = db.query(McpToken).filter(McpToken.user_id == ids["admin"]).one()
-    assert row.token_hash == mcp_tokens.hash_token(token)
-    assert token not in (row.token_hash, row.token_prefix)
+    row = db.query(OAuthClient).filter(OAuthClient.client_id == client_id).one()
+    assert secret not in row.secret_hash
     db.close()
 
-    tools = {t["name"] for t in rpc(client, token, "tools/list")["tools"]}
+    tokens = connect(client, ids, client_id, secret)
+    assert tokens["token_type"] == "Bearer" and tokens["refresh_token"]
+    tools = {t["name"] for t in rpc(client, tokens["access_token"], "tools/list")["tools"]}
     assert tools == {
         "get_week_results", "get_season_standings", "get_award_standings",
         "get_money_owed", "get_pick_sheet", "submit_picks",
+        "get_week_picks", "get_rooting_guide",
     }, tools
 
-    # The token also works as a query parameter, for URL-only clients.
-    resp = client.post(f"/mcp?token={token}", headers=HEADERS, json={
-        "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {},
+    # Refresh tokens rotate: the new pair works, the old refresh token doesn't.
+    basic = base64.b64encode(f"{client_id}:{secret}".encode()).decode()
+    fresh = client.post("/oauth/token", headers={"Authorization": f"Basic {basic}"}, data={
+        "grant_type": "refresh_token", "refresh_token": tokens["refresh_token"],
     })
-    assert resp.status_code == 200
-    return token
+    assert fresh.status_code == 200, fresh.text
+    assert rpc(client, fresh.json()["access_token"], "tools/list")["tools"]
+    again = client.post("/oauth/token", headers={"Authorization": f"Basic {basic}"}, data={
+        "grant_type": "refresh_token", "refresh_token": tokens["refresh_token"],
+    })
+    assert again.status_code == 400 and again.json()["error"] == "invalid_grant"
+    return client_id, secret, fresh.json()["access_token"]
 
 
-def test_players_cannot_hold_a_token_yet(client, ids):
-    client.cookies.set("access_token", create_access_token(ids["player"]))
-    page = client.post("/settings/mcp-token", follow_redirects=False)
-    client.cookies.clear()
-    assert page.status_code == 303
+def test_oauth_refuses_what_it_should(client, ids, client_id, secret):
+    # A redirect URI that isn't registered never receives anything.
+    verifier, challenge = pkce()
+    page = authorize(client, ids["admin"], client_id, challenge,
+                     redirect_uri="https://evil.example/callback")
+    assert page.status_code == 400 and "not registered" in page.text
 
-    # Nor does one made behind the page's back work.
+    # Claude Code's local listener may use any port.
+    resp = authorize(client, ids["admin"], client_id, challenge,
+                     redirect_uri="http://localhost:53123/callback")
+    assert "code" in code_from(resp)
+
+    # Declining sends the refusal back to Claude.
+    resp = authorize(client, ids["admin"], client_id, challenge, decision="deny")
+    assert code_from(resp)["error"] == "access_denied"
+
+    # Wrong secret; wrong PKCE verifier; a code used twice.
+    code = code_from(authorize(client, ids["admin"], client_id, challenge))["code"]
+    bad = client.post("/oauth/token", data={
+        "grant_type": "authorization_code", "code": code, "redirect_uri": CALLBACK,
+        "code_verifier": verifier, "client_id": client_id, "client_secret": "nalsec_wrong",
+    })
+    assert bad.status_code == 401 and bad.json()["error"] == "invalid_client"
+    code = code_from(authorize(client, ids["admin"], client_id, challenge))["code"]
+    bad = client.post("/oauth/token", data={
+        "grant_type": "authorization_code", "code": code, "redirect_uri": CALLBACK,
+        "code_verifier": "not-the-verifier", "client_id": client_id, "client_secret": secret,
+    })
+    assert bad.json()["error"] == "invalid_grant"
+    code = code_from(authorize(client, ids["admin"], client_id, challenge))["code"]
+    form = {
+        "grant_type": "authorization_code", "code": code, "redirect_uri": CALLBACK,
+        "code_verifier": verifier, "client_id": client_id, "client_secret": secret,
+    }
+    assert client.post("/oauth/token", data=form).status_code == 200
+    assert client.post("/oauth/token", data=form).json()["error"] == "invalid_grant"
+
+
+def test_login_returns_to_the_approval_page(client, ids):
+    resp = client.get("/oauth/authorize?client_id=x", follow_redirects=False)
+    assert resp.status_code == 400  # unknown client: shown, never redirected
+    assert safe_next("/oauth/authorize?a=1") == "/oauth/authorize?a=1"
+    assert safe_next("//evil.example") is None
+    assert safe_next("https://evil.example") is None
+
+
+def test_players_cannot_connect_yet(client, ids, client_id, secret):
+    verifier, challenge = pkce()
+    page = authorize(client, ids["player"], client_id, challenge)
+    assert page.status_code == 403
+
+    # Nor does a token made behind the approval page's back work.
     db = SessionLocal()
-    token = mcp_tokens.issue_token(db, db.get(User, ids["player"]))
+    oc = db.query(OAuthClient).filter(OAuthClient.client_id == client_id).one()
+    token = oauth._issue(db, oauth.ACCESS, oc, db.get(User, ids["player"]), oauth.ACCESS_TTL)
+    db.commit()
     db.close()
     assert rpc(client, token, "tools/list", raw=True).status_code == 401
 
@@ -345,6 +484,52 @@ def test_locked_week_refuses_picks(client, token, ids):
     db.close()
 
 
+def test_everyones_picks_stay_hidden_until_the_lock(client, token):
+    msg = err(client, token, "get_week_picks", week_number=2)
+    assert "hidden until the first kickoff" in msg, msg
+    msg = err(client, token, "get_rooting_guide", week_number=2)
+    assert "hidden until the first kickoff" in msg, msg
+
+
+def test_week_picks_and_rooting_guide_once_locked(client, token, ids):
+    # Ada's week-2 picks are NE 15, SF 16, CHI 14 (from the submit test).
+    # Pat takes NE for *more* than Ada did, so NE covering helps Pat more than
+    # Ada: she should root against her own pick there.
+    db = SessionLocal()
+    db.query(Pick).filter(Pick.user_id == ids["player"], Pick.week_id == ids["week2"]).delete()
+    season_id = db.get(Week, ids["week2"]).season_id
+    ne, sea, chi = ids["w2_games"]
+    for game_id, team, pts in [(ne, "NE", 16), (sea, "SEA", 15), (chi, "GB", 14)]:
+        db.add(Pick(user_id=ids["player"], game_id=game_id, week_id=ids["week2"],
+                    season_id=season_id, picked_team=team, confidence_points=pts))
+    db.get(Week, ids["week2"]).is_picks_locked = True
+    db.commit()
+    db.close()
+
+    picks = ok(client, token, "get_week_picks")
+    assert picks["week_number"] == 2
+    ne_game = next(g for g in picks["games"] if g["matchup"] == "NYJ @ NE")
+    assert [(p["player"], p["team"], p["points"]) for p in ne_game["picks"]] == [
+        ("Pat Player", "NE", 16), ("Ada Admin", "NE", 15),
+    ]
+    assert ne_game["points_on_NE"] == 31 and ne_game["points_on_NYJ"] == 0
+
+    guide = ok(client, token, "get_rooting_guide")
+    assert [r["player"] for r in guide["week_rivals"]] == ["Pat Player"]
+    assert [r["player"] for r in guide["season_rivals"]] == ["Pat Player"]
+    by_game = {g["matchup"]: g for g in guide["games"]}
+
+    ne_row = by_game["NYJ @ NE"]
+    assert ne_row["if_covers"]["NE"] == {"you_gain": 15.0, "net_vs": {"Pat Player": -1.0}}
+    assert ne_row["root_for_week"] == "NYJ"
+    assert ne_row["root_for_season"] == "NYJ"
+    assert ne_row["root_against_your_own_pick"] is True
+
+    assert by_game["SF @ SEA"]["root_for_week"] == "SF"
+    assert by_game["GB @ CHI"]["root_for_week"] == "CHI"
+    assert by_game["GB @ CHI"]["root_against_your_own_pick"] is False
+
+
 def test_a_deactivated_owner_loses_access(client, token, ids):
     db = SessionLocal()
     db.get(User, ids["admin"]).is_active = False
@@ -359,8 +544,11 @@ if __name__ == "__main__":
     ids = build_league()
     with TestClient(app) as client:
         test_requests_without_a_valid_token_are_refused(client, ids)
-        token = test_settings_issues_a_token_once_and_stores_only_its_hash(client, ids)
-        test_players_cannot_hold_a_token_yet(client, ids)
+        test_discovery_metadata(client, ids)
+        client_id, secret, token = test_full_oauth_flow_connects_claude(client, ids)
+        test_oauth_refuses_what_it_should(client, ids, client_id, secret)
+        test_login_returns_to_the_approval_page(client, ids)
+        test_players_cannot_connect_yet(client, ids, client_id, secret)
         test_open_week_results_show_submissions_not_picks(client, token)
         test_week_results_default_to_latest_locked_week(client, token)
         test_season_standings(client, token)
@@ -369,5 +557,7 @@ if __name__ == "__main__":
         test_submit_picks_fills_in_and_rearranges(client, token)
         test_invalid_submissions_change_nothing(client, token, ids)
         test_locked_week_refuses_picks(client, token, ids)
+        test_everyones_picks_stay_hidden_until_the_lock(client, token)
+        test_week_picks_and_rooting_guide_once_locked(client, token, ids)
         test_a_deactivated_owner_loses_access(client, token, ids)
     print("all MCP tests passed")
