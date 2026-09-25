@@ -3,8 +3,8 @@
 
 {% block extra_head %}
 <style>
-  /* Frozen pick matrix: the first four columns (game and spread, result, who
-     to root for and the viewer's own picks) stay put while the rest scroll sideways, and the
+  /* Frozen pick matrix: the first three columns (the game with its spread and
+     result, who to root for and the viewer's own picks) stay put while the rest scroll sideways, and the
      header and totals rows stay put while the games scroll past. Everything
      lives inside one scroll container so both axes stick to the same box.
 
@@ -36,17 +36,15 @@
   .pm-table thead .pm-fz,
   .pm-table tfoot .pm-fz { z-index: 30; }
 
-  .pm-c1 { left: 0;     min-width: 104px; max-width: 104px; width: 104px; }
-  .pm-c2 { left: 104px; min-width: 62px;  max-width: 62px;  width: 62px;  }
-  .pm-c3 { left: 166px; min-width: 56px;  max-width: 56px;  width: 56px;  }
-  .pm-c4 { left: 222px; min-width: 56px;  max-width: 56px;  width: 56px;
+  .pm-c1 { left: 0;     min-width: 88px;  max-width: 88px;  width: 88px;  }
+  .pm-c2 { left: 88px;  min-width: 46px;  max-width: 46px;  width: 46px;  }
+  .pm-c3 { left: 134px; min-width: 50px;  max-width: 50px;  width: 50px;
            box-shadow: 3px 0 5px -3px rgba(0, 0, 0, .35); }
 
   @media (min-width: 640px) {
-    .pm-c1 { left: 0;     min-width: 200px; max-width: 200px; width: 200px; }
-    .pm-c2 { left: 200px; min-width: 108px; max-width: 108px; width: 108px; }
-    .pm-c3 { left: 308px; min-width: 88px;  max-width: 88px;  width: 88px;  }
-    .pm-c4 { left: 396px; min-width: 84px;  max-width: 84px;  width: 84px;  }
+    .pm-c1 { left: 0;     min-width: 220px; max-width: 220px; width: 220px; }
+    .pm-c2 { left: 220px; min-width: 88px;  max-width: 88px;  width: 88px;  }
+    .pm-c3 { left: 308px; min-width: 84px;  max-width: 84px;  width: 84px;  }
   }
 
   /* The viewer's own column, tinted like the standings row that marks them. */
@@ -115,23 +113,22 @@
 
 <!-- Pick matrix -->
 <p class="text-xs text-gray-500 mb-2">
-  Scroll sideways to compare &mdash; the game, result, who to root for and your own picks
-  stay put, and so does the row of names.
+  Scroll sideways to compare &mdash; the game, who to root for and your own picks stay put,
+  and so does the row of names.
 </p>
 <div class="bg-white rounded-xl shadow pm-wrap mb-6">
   <table class="text-sm w-full pm-table">
     <thead>
       <tr>
         <th class="pm-fz pm-c1 text-left px-2 sm:px-4 py-2 sm:py-3 font-medium text-gray-600 text-xs sm:text-sm leading-tight whitespace-nowrap">
-          Game<span class="block text-[9px] sm:text-xs font-normal text-gray-400">&amp; spread</span>
+          Game
         </th>
-        <th class="pm-fz pm-c2 text-center px-1 sm:px-2 py-2 sm:py-3 font-medium text-gray-600 text-[10px] sm:text-sm whitespace-nowrap">Result</th>
-        <th class="pm-fz pm-c3 text-center px-1 sm:px-2 py-2 sm:py-3 font-medium text-gray-600 text-[10px] sm:text-sm leading-tight"
+        <th class="pm-fz pm-c2 text-center px-1 sm:px-2 py-2 sm:py-3 font-medium text-gray-600 text-[10px] sm:text-sm leading-tight"
             title="The outcome that helps you most against the players you're racing">
           Root<span class="sm:hidden"><br/></span> For
         </th>
         {% for u in users %}
-        <th class="{% if loop.first %}pm-fz pm-c4 px-1 sm:px-2{% else %}px-3{% endif %}
+        <th class="{% if loop.first %}pm-fz pm-c3 px-1 sm:px-2{% else %}px-2 sm:px-3{% endif %}
                    {% if u.id == user.id %}pm-you{% endif %}
                    text-center py-2 sm:py-3 font-medium text-gray-600 text-[10px] sm:text-sm whitespace-nowrap">
           <a href="/profile/{{ u.id }}" class="hover:underline">
@@ -159,26 +156,23 @@
             {% else %}{{ game.home_team if game.spread < 0 else game.away_team }} -{{ "%g"|format(game.spread|abs) }}
             {% endif %}
           </div>
-        </td>
-        <td class="pm-fz pm-c2 px-1 sm:px-2 py-2 sm:py-3 text-center font-medium leading-tight">
+          {# The result, once there is one — an upcoming game needs no line. #}
           {% if game.is_final %}
-            <span class="text-[10px] sm:text-xs">{{ game.away_score }}-{{ game.home_score }}</span><br/>
-            <span class="text-[9px] sm:text-xs whitespace-nowrap {% if game.home_covered %}text-green-600{% else %}text-blue-600{% endif %}">
+          <div class="text-[10px] sm:text-xs font-medium mt-0.5 sm:pl-8">
+            {{ game.away_score }}-{{ game.home_score }}
+            <span class="{% if game.home_covered %}text-green-600{% else %}text-blue-600{% endif %}">
               {{ game.home_team if game.home_covered else game.away_team }}<span class="hidden sm:inline"> covered</span><span class="sm:hidden"> &#10003;</span>
             </span>
+          </div>
           {% elif game.is_underway %}
-            <span class="text-[9px] sm:text-xs live-pulse text-green-600">
-              {% if game.home_score is not none and game.away_score is not none %}
-                {{ game.away_score }}-{{ game.home_score }} LIVE
-              {% else %}LIVE{% endif %}
-            </span>
-          {% else %}
-            <span class="text-[9px] sm:text-xs text-gray-400">Upcoming</span>
+          <div class="text-[10px] sm:text-xs font-medium mt-0.5 sm:pl-8 live-pulse text-green-600">
+            {% if game.home_score is not none and game.away_score is not none %}{{ game.away_score }}-{{ game.home_score }} {% endif %}LIVE
+          </div>
           {% endif %}
         </td>
         {% set root = root_for_game.get(game.id) %}
         {% set my_pick = pick_matrix.get(user.id, {}).get(game.id) %}
-        <td class="pm-fz pm-c3 px-1 sm:px-2 py-2 sm:py-3 text-center leading-tight">
+        <td class="pm-fz pm-c2 px-1 sm:px-2 py-2 sm:py-3 text-center leading-tight">
           {% if not root %}
             <span class="text-gray-300 text-xs">&mdash;</span>
           {% elif root == 'either' %}
@@ -193,7 +187,7 @@
 
         {% for u in users %}
         {% set pick = pick_matrix.get(u.id, {}).get(game.id) %}
-        <td class="{% if loop.first %}pm-fz pm-c4 px-1 sm:px-2{% else %}px-3{% endif %}
+        <td class="{% if loop.first %}pm-fz pm-c3 px-1 sm:px-2{% else %}px-2 sm:px-3{% endif %}
                    {% if u.id == user.id %}pm-you{% endif %}
                    py-2 sm:py-3 text-center">
           {% if pick %}
@@ -223,10 +217,9 @@
       <tr>
         <td class="pm-fz pm-c1 px-2 sm:px-4 py-2 sm:py-3 font-semibold text-xs sm:text-sm">Total</td>
         <td class="pm-fz pm-c2"></td>
-        <td class="pm-fz pm-c3"></td>
         {% for u in users %}
         {% set user_standings = standings|selectattr("user.id", "equalto", u.id)|first %}
-        <td class="{% if loop.first %}pm-fz pm-c4 px-1 sm:px-2{% else %}px-3{% endif %}
+        <td class="{% if loop.first %}pm-fz pm-c3 px-1 sm:px-2{% else %}px-2 sm:px-3{% endif %}
                    {% if u.id == user.id %}pm-you{% endif %}
                    py-2 sm:py-3 text-center font-bold text-xs sm:text-sm">
           {{ user_standings.total|int if user_standings else '—' }}
