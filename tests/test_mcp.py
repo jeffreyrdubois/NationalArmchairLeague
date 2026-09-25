@@ -421,6 +421,22 @@ def test_money_owed(client, token):
     assert fees == {"Pat Player": {"player": "Pat Player", "paid": 25.0, "still_owes": 25.0}}
 
 
+def test_pick_sheet_shows_listed_spreads(client, token):
+    sheet = ok(client, token, "get_pick_sheet")
+    assert sheet["spreads_locked"] is False
+    assert sheet["games_without_a_spread"] == []
+    games = {g["matchup"]: g for g in sheet["games"]}
+    jets = games["NYJ @ NE"]
+    assert jets["spread"] == "NYJ -1.5"
+    detail = jets["spread_detail"]
+    assert (detail["favorite"], detail["underdog"], detail["points"]) == ("NYJ", "NE", 1.5)
+    assert (detail["away_line"], detail["home_line"]) == ("NYJ -1.5", "NE +1.5")
+    assert detail["set_by"] == "odds feed"
+    pickem = games["GB @ CHI"]["spread_detail"]
+    assert pickem["favorite"] is None
+    assert (pickem["away_line"], pickem["home_line"]) == ("GB PK", "CHI PK")
+
+
 def test_submit_picks_fills_in_and_rearranges(client, token):
     sheet = ok(client, token, "get_pick_sheet")
     assert sheet["week_number"] == 2
@@ -554,6 +570,7 @@ if __name__ == "__main__":
         test_season_standings(client, token)
         test_award_standings(client, token)
         test_money_owed(client, token)
+        test_pick_sheet_shows_listed_spreads(client, token)
         test_submit_picks_fills_in_and_rearranges(client, token)
         test_invalid_submissions_change_nothing(client, token, ids)
         test_locked_week_refuses_picks(client, token, ids)

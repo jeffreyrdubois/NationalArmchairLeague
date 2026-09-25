@@ -14,6 +14,7 @@ are built on, so a number here never disagrees with the one on the site.
 """
 
 import logging
+from datetime import datetime
 from typing import Any
 
 import anyio
@@ -28,7 +29,9 @@ from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
 from app.database import SessionLocal
-from app.models import AppSetting, Game, Pick, Role, Season, Transaction, User, Week
+from app.models import (
+    AppSetting, Game, Pick, Role, Season, SpreadSource, Transaction, User, Week,
+)
 from app.routers.picks import apply_picks, available_points_for
 from app.services import payouts, scoring
 from app.services.awards import AWARD_REGISTRY, compute_all_awards, rank_award
@@ -199,6 +202,34 @@ def _line(game: Game) -> str | None:
         return "Pick'em"
     favourite = game.home_team if game.spread < 0 else game.away_team
     return f"{favourite} -{abs(game.spread):g}"
+
+
+def _signed(points: float) -> str:
+    return f"{points:+g}" if points else "PK"
+
+
+def _spread_detail(game: Game) -> dict[str, Any] | None:
+    """The listed spread for a pick sheet: each side's line, who set it, and
+    when. None until a line has been posted for the game."""
+    if game.spread is None:
+        return None
+    if game.spread == 0:
+        favourite = underdog = None
+    elif game.spread < 0:
+        favourite, underdog = game.home_team, game.away_team
+    else:
+        favourite, underdog = game.away_team, game.home_team
+    return {
+        "favorite": favourite,
+        "underdog": underdog,
+        "points": abs(game.spread),
+        "away_line": f"{game.away_team} {_signed(-game.spread)}",
+        "home_line": f"{game.home_team} {_signed(game.spread)}",
+        "set_by": (
+            "commissioner" if game.spread_source == SpreadSource.manual else "odds feed"
+        ),
+        "updated": _eastern(game.spread_updated_at),
+    }
 
 
 def _status(game: Game) -> str:
@@ -789,6 +820,12 @@ def get_rooting_guide(
 # Tools: making picks
 # ---------------------------------------------------------------------------
 
+def _spreads_locked(week: Week) -> bool:
+    if week.is_spreads_locked:
+        return True
+    return bool(week.spread_lock_time and datetime.utcnow() >= week.spread_lock_time)
+
+
 def _pick_sheet(db: Session, week: Week, user: User) -> dict[str, Any]:
     games = _week_games(db, week)
     points = available_points_for(len(games))
@@ -799,6 +836,7 @@ def _pick_sheet(db: Session, week: Week, user: User) -> dict[str, Any]:
     rows = []
     for game in games:
         row = _game(game)
+        row["spread_detail"] = _spread_detail(game)
         pick = mine.get(game.id)
         row["your_pick"] = (
             {"team": pick.picked_team, "points": pick.confidence_points} if pick else None
@@ -811,6 +849,9 @@ def _pick_sheet(db: Session, week: Week, user: User) -> dict[str, Any]:
         "week": _week_label(week),
         "picks_locked": bool(week.is_picks_locked),
         "picks_lock_at": _eastern(week.first_kickoff),
+        "spreads_locked": _spreads_locked(week),
+        "spreads_lock_at": _eastern(week.spread_lock_time),
+        "games_without_a_spread": [r["matchup"] for r in rows if r["spread"] is None],
         "point_values": points,
         "unused_point_values": [p for p in points if p not in used],
         "games_without_a_pick": [r["matchup"] for r in rows if not r["your_pick"]],
@@ -835,8 +876,17 @@ def get_pick_sheet(
     week_number: int | None = None,
 ) -> dict[str, Any]:
     """Your pick sheet for a week of the active season (default: the week open
-    for picks): every game with its spread and kickoff, the pick you have in
-    for it, the point values the week uses and which are still unassigned."""
+    for picks): every game with its kickoff, the pick you have in for it, the
+    point values the week uses and which are still unassigned.
+
+    Each game carries the league's currently listed spread: `spread` is the
+    favourite and the points they give ("KC -3", or "Pick'em"), and
+    `spread_detail` gives each side's line ("BUF +3" / "KC -3"), whether the
+    odds feed or the commissioner set it, and when it last changed. Spreads are
+    rounded to the half point so no game pushes. Until `spreads_locked` is true
+    (see `spreads_lock_at`, about a day before the first kickoff) the odds feed
+    may still move a line; after that it is final. Games whose line hasn't been
+    posted yet are listed in `games_without_a_spread`."""
     db = SessionLocal()
     try:
         user = _caller(db, ctx)

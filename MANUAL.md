@@ -571,7 +571,7 @@ admin.
 | `get_season_standings` | The season leaderboard, with points behind the leader and weeks won. |
 | `get_award_standings` | Each award's rules, prize, leaders and your place. |
 | `get_money_owed` | Prize money each player is owed (earned minus paid, plus season-end projections) and unpaid entry fees. |
-| `get_pick_sheet` | The open week's games, spreads and kickoffs, your current picks, and unused point values. |
+| `get_pick_sheet` | The open week's games and kickoffs, the currently listed spread for each (both sides' lines, who set it, when it last moved, and whether spreads are locked yet), your current picks, and unused point values. |
 | `submit_picks` | Enter or change picks. Teams can be named by abbreviation or name (`"KC"`, `"Chiefs"`); games you leave out keep their current pick. |
 
 The rooting guide weighs each outcome by your gain minus each rival's gain.
