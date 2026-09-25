@@ -297,6 +297,7 @@ async def all_picks_for_week(
 
     pick_matrix = {}
     standings = []
+    root_for_game = {}
     if revealed:
         # Build matrix: {user_id: {game_id: pick}}
         for pick in db.query(Pick).filter(Pick.week_id == week_id).all():
@@ -304,6 +305,12 @@ async def all_picks_for_week(
 
         from app.services.scoring import get_week_standings
         standings = get_week_standings(db, week_id)
+
+        # The side of each unfinished game that helps the viewer most — not
+        # always their own pick, when a rival has more points on it.
+        from app.services.rooting import root_for, rooting_guide
+        guide = rooting_guide(db, week, user.id)
+        root_for_game = {g.id: root_for(guide, g) for g in games}
 
     submission_status = get_submission_status(db, week)
 
@@ -318,6 +325,7 @@ async def all_picks_for_week(
             "revealed": revealed,
             "pick_matrix": pick_matrix,
             "standings": standings,
+            "root_for_game": root_for_game,
             "submission_status": submission_status,
             "submitted_count": sum(1 for r in submission_status if r["is_complete"]),
         },

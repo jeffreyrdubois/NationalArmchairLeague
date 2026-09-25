@@ -6,8 +6,8 @@ then the finals — so the rows that can still change are the ones on screen.
 
 Also: the matrix keeps the viewer's own column in the frozen block.
 
-The table is wider than a phone, so the first four columns (game, spread,
-result and the viewer's own picks) are frozen while the rest scroll sideways.
+The table is wider than a phone, so the first four columns (game and spread,
+result, who to root for and the viewer's own picks) are frozen while the rest scroll sideways.
 Three of those four are fixed by the template, but the fourth depends on the
 route ordering the players so the viewer comes first — get that wrong and
 everyone compares against whichever player happens to sort first, which is the
@@ -215,6 +215,62 @@ def test_the_frozen_columns_and_header_are_marked_up():
     for column in ("pm-c1", "pm-c2", "pm-c3", "pm-c4"):
         assert column in html, f"frozen column {column} is missing from the matrix"
     assert "pm-you" in html, "the viewer's column is not tinted as theirs"
+
+
+def build_rooting_week():
+    """An upcoming game where a rival has far more riding on the viewer's team."""
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    db = SessionLocal()
+    season = Season(year=2033, is_active=True)
+    db.add(season)
+    db.flush()
+    week = Week(
+        season_id=season.id, week_number=1, label="Week 1",
+        first_kickoff=datetime.utcnow() - timedelta(hours=2), is_picks_locked=True,
+    )
+    db.add(week)
+    db.flush()
+    game = Game(
+        week_id=week.id, home_team="HOM", away_team="AWY",
+        kickoff_time=datetime.utcnow() + timedelta(hours=2), spread=2.5,
+    )
+    db.add(game)
+    viewer = User(first_name="Vic", last_name="Viewer", email="v@x.com",
+                  password_hash="x", role=Role.player)
+    rival = User(first_name="Rae", last_name="Rival", email="r@x.com",
+                 password_hash="x", role=Role.player)
+    db.add_all([viewer, rival])
+    db.flush()
+    # Both took HOM, but the rival put 16 on it to the viewer's 1: a HOM cover
+    # puts the viewer 15 further behind, so the viewer should root for AWY.
+    for person, points in ((viewer, 1), (rival, 16)):
+        db.add(Pick(user_id=person.id, game_id=game.id, week_id=week.id,
+                    season_id=season.id, picked_team="HOM", confidence_points=points))
+    db.commit()
+    ids = {"week": week.id, "viewer": viewer.id}
+    db.close()
+    return ids
+
+
+def test_root_for_can_be_the_team_you_did_not_pick():
+    ids = build_rooting_week()
+    html = client_for(ids["viewer"]).get(f"/picks/week/{ids['week']}/all").text
+    assert "Root" in html.split("<thead>", 1)[1].split("</thead>", 1)[0], \
+        "the matrix has no Root For column"
+    row = html.split("<!-- Pick matrix -->", 1)[1].split("<tbody>", 1)[1].split("</tr>", 1)[0]
+    root_cell = row.split("pm-c3", 1)[1].split("</td>", 1)[0]
+    assert ">AWY<" in root_cell, f"expected to root for AWY: {root_cell}"
+    assert "not your pick" in root_cell, "rooting against your own pick is not flagged"
+
+
+def test_the_spread_sits_under_the_game():
+    ids = build_rooting_week()
+    html = client_for(ids["viewer"]).get(f"/picks/week/{ids['week']}/all").text
+    row = html.split("<!-- Pick matrix -->", 1)[1].split("<tbody>", 1)[1].split("</tr>", 1)[0]
+    game_cell = row.split("pm-c1", 1)[1].split("</td>", 1)[0]
+    assert "AWY -2.5" in game_cell, f"the favourite's line is not in the game cell: {game_cell}"
 
 
 if __name__ == "__main__":

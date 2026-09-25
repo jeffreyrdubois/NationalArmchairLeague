@@ -73,6 +73,13 @@ async def home(request: Request, db: Session = Depends(get_db)):
         .all()
     )
 
+    # The latest week whose picks everyone can see, for the "picks" shortcut
+    # at the top of the page: the current week once it locks, the week before
+    # it until then.
+    revealed_week = next(
+        (w for w in reversed(all_weeks) if picks_are_revealed(w)), None
+    )
+
     # Fund summary for the current user
     fund_rows = {r.key: r.value for r in db.query(AppSetting).filter(
         AppSetting.key.in_(["entry_fee", "payment_venmo", "payment_paypal", "payment_cashapp", "payment_zelle"])
@@ -101,6 +108,7 @@ async def home(request: Request, db: Session = Depends(get_db)):
             "week_standings": week_standings,
             "my_picks": {p.game_id: p for p in my_picks},
             "all_weeks": all_weeks,
+            "revealed_week": revealed_week,
             "fund_entry_fee":  fund_entry_fee,
             "fund_my_paid_in": fund_my_paid_in,
             "fund_my_received": fund_my_received,

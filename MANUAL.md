@@ -118,11 +118,23 @@ such edit is recorded in the admin audit log.
 ### Reading the All Picks Grid
 After the lock, `/picks/week/{id}/all` shows every player's picks as one grid —
 one row per game, one column per player. It is wider than a phone screen, so the
-first four columns are frozen: the game, the spread, the result and **your own
-picks**, which are pulled to the front and tinted. Scroll sideways and those four
-stay put while the other players slide past, so you are always comparing against
-your own column. The row of player names and the totals row stay put as you
-scroll up and down.
+first four columns are frozen: the game (with the spread written under it as the
+favorite and the points they give, e.g. "GB -5.5"), the result, **Root For** and
+**your own picks**, which are pulled to the front and tinted. Scroll sideways and
+those four stay put while the other players slide past, so you are always
+comparing against your own column. The row of player names and the totals row
+stay put as you scroll up and down.
+
+**Root For** names the side of each unfinished game that helps you most against
+the players you're still racing that week — anyone who can still finish ahead of
+you, or whom you can still pass. Once the week is settled it switches to your
+nearest rivals in the season standings. It isn't always your own pick: if a rival
+put more points on your team than you did, their cover hurts you more than it
+helps, and the column flags that as **not your pick**.
+
+The dashboard's **Current Week's Picks** button (at the top) opens this grid for
+the most recent week whose picks are revealed — the current week once it locks,
+the week before until then.
 
 ### Important Timing Notes
 - **Spreads** may still update up until 24 hours before the first kickoff

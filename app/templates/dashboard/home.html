@@ -2,16 +2,25 @@
 {% block title %}Dashboard &mdash; NAL{% endblock %}
 {% block content %}
 
-<div class="flex items-center justify-between mb-6">
+<div class="flex flex-wrap items-center justify-between gap-3 mb-6">
   <h1 class="text-2xl font-bold">
     {{ season.year }} Season
     {% if current_week %}&mdash; {{ current_week.label or ('Week ' + current_week.week_number|string) }}{% endif %}
   </h1>
-  {% if current_week and not current_week.is_picks_locked %}
-  <a href="/picks" class="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold px-4 py-2 rounded-lg transition">
-    Enter My Picks
-  </a>
-  {% endif %}
+  <div class="flex flex-wrap items-center gap-2">
+    {% if revealed_week %}
+    <a href="/picks/week/{{ revealed_week.id }}/all"
+       class="bg-white hover:bg-gray-50 border border-gray-300 text-gray-800 font-semibold px-4 py-2 rounded-lg transition">
+      {% if current_week and revealed_week.id == current_week.id %}Current Week&rsquo;s Picks
+      {% else %}{{ revealed_week.label or ('Week ' + revealed_week.week_number|string) }} Picks{% endif %}
+    </a>
+    {% endif %}
+    {% if current_week and not current_week.is_picks_locked %}
+    <a href="/picks" class="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold px-4 py-2 rounded-lg transition">
+      Enter My Picks
+    </a>
+    {% endif %}
+  </div>
 </div>
 
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -57,7 +66,7 @@
                 <div class="text-xs text-gray-500">Final</div>
               {% elif game.is_in_progress %}
                 <div class="font-bold live-pulse text-green-600">{{ game.away_score }} - {{ game.home_score }}</div>
-                <div class="text-xs text-green-600">Q{{ game.quarter }} {{ game.time_remaining }}</div>
+                <div class="text-xs text-green-600">{% if game.quarter %}Q{{ game.quarter }} {{ game.time_remaining or "" }}{% else %}LIVE{% endif %}</div>
               {% else %}
                 <div class="text-xs text-gray-500">
                   {{ (game.kickoff_time | eastern).strftime('%a %-I:%M%p ET') if game.kickoff_time else 'TBD' }}
