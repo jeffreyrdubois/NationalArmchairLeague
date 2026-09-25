@@ -33,7 +33,7 @@ from app.models import (
     AppSetting, Game, Pick, Role, Season, SpreadSource, Transaction, User, Week,
 )
 from app.routers.picks import apply_picks, available_points_for
-from app.services import payouts, scoring
+from app.services import payouts, rooting, scoring
 from app.services.awards import AWARD_REGISTRY, compute_all_awards, rank_award
 from app.services.oauth import user_for_access_token
 from app.services.scoring import compute_home_covered, get_week_standings
@@ -670,17 +670,6 @@ def get_week_picks(
         db.close()
 
 
-def _outcome_net(deltas: dict[int, float], me: int, rivals: list[int]) -> float:
-    return sum(deltas.get(me, 0) - deltas.get(r, 0) for r in rivals)
-
-
-def _pick_side(nets: dict[str, float]) -> str:
-    (a, na), (b, nb) = nets.items()
-    if na == nb:
-        return "either"
-    return a if na > nb else b
-
-
 @mcp.tool()
 def get_rooting_guide(
     ctx: Context,
@@ -706,52 +695,22 @@ def get_rooting_guide(
         season = _season(db, None)
         week = _revealed_week(db, season, week_number)
 
-        week_rows = {r["user"].id: r for r in get_week_standings(db, week.id) if r["user"]}
-        season_rows = [r for r in scoring.get_season_standings(db, season.id) if r["user"]]
-        names = {uid: _name(r["user"]) for uid, r in week_rows.items()}
-        names.update({r["user"].id: _name(r["user"]) for r in season_rows})
-        if me.id not in week_rows:
+        guide = rooting.rooting_guide(db, week, me.id)
+        if guide is None:
             raise ToolError(f"You have no picks in {_week_label(week)}.")
-
-        # --- the week race: who can still finish either side of you ---
-        mine = week_rows[me.id]
-        week_rivals = [
-            uid for uid, r in week_rows.items()
-            if uid != me.id
-            and r["potential"] >= mine["total"]
-            and mine["potential"] >= r["total"]
-        ]
-
-        # --- the season race: your nearest neighbours in the standings ---
-        season_total = {r["user"].id: r["total"] for r in season_rows}
-        my_season = season_total.get(me.id, 0)
-        ahead = [t for uid, t in season_total.items() if uid != me.id and t >= my_season]
-        behind = [t for uid, t in season_total.items() if uid != me.id and t < my_season]
-        season_rivals = [
-            uid for uid, t in season_total.items()
-            if uid != me.id and (
-                (ahead and t == min(ahead)) or (behind and t == max(behind))
-            )
-        ]
-
-        picks_by_game: dict[int, dict[int, Pick]] = {}
-        for pick in db.query(Pick).filter(Pick.week_id == week.id):
-            picks_by_game.setdefault(pick.game_id, {})[pick.user_id] = pick
+        week_rows, season_total = guide["week_rows"], guide["season_total"]
+        week_rivals, season_rivals = guide["week_rivals"], guide["season_rivals"]
+        names = {uid: _name(r["user"]) for uid, r in week_rows.items()}
+        names.update({r["user"].id: _name(r["user"]) for r in guide["season_rows"]})
+        mine = guide["mine"]
 
         games = []
         for game in _week_games(db, week):
-            if game.is_final:
+            info = guide["games"].get(game.id)
+            if info is None:
                 continue
-            picks = picks_by_game.get(game.id, {})
-            outcomes = {}
-            deltas_by_team = {}
-            for team in (game.away_team, game.home_team):
-                deltas = {
-                    uid: float(p.confidence_points) if p.picked_team == team else 0.0
-                    for uid, p in picks.items()
-                }
-                deltas_by_team[team] = deltas
-                outcomes[team] = {
+            outcomes = {
+                team: {
                     "you_gain": deltas.get(me.id, 0.0),
                     "net_vs": {
                         names.get(uid, "Unknown"): deltas.get(me.id, 0.0) - d
@@ -759,13 +718,9 @@ def get_rooting_guide(
                         if uid != me.id
                     },
                 }
-            week_net = {
-                t: _outcome_net(d, me.id, week_rivals) for t, d in deltas_by_team.items()
+                for team, deltas in info["deltas_by_team"].items()
             }
-            season_net = {
-                t: _outcome_net(d, me.id, season_rivals) for t, d in deltas_by_team.items()
-            }
-            your = picks.get(me.id)
+            your = info["your_pick"]
             row = _game(game)
             leaning = _currently_covering(game)
             if leaning:
@@ -776,13 +731,10 @@ def get_rooting_guide(
                     if your else None
                 ),
                 "if_covers": outcomes,
-                "root_for_week": (
-                    _pick_side(week_net) if week_rivals
-                    else (your.picked_team if your else "either")
-                ),
-                "week_net_by_outcome": week_net,
-                "root_for_season": _pick_side(season_net) if season_rivals else "either",
-                "season_net_by_outcome": season_net,
+                "root_for_week": info["root_for_week"],
+                "week_net_by_outcome": info["week_net"],
+                "root_for_season": info["root_for_season"],
+                "season_net_by_outcome": info["season_net"],
             })
             row["root_against_your_own_pick"] = bool(
                 your and row["root_for_week"] not in (your.picked_team, "either")
@@ -796,7 +748,7 @@ def get_rooting_guide(
             "you": {
                 "week_points": mine["total"],
                 "week_max_possible": mine["potential"],
-                "season_points": my_season,
+                "season_points": guide["my_season"],
             },
             "week_rivals": [
                 {
