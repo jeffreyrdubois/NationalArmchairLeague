@@ -6,9 +6,9 @@ then the finals — so the rows that can still change are the ones on screen.
 
 Also: the matrix keeps the viewer's own column in the frozen block.
 
-The table is wider than a phone, so the first four columns (game and spread,
-result, who to root for and the viewer's own picks) are frozen while the rest scroll sideways.
-Three of those four are fixed by the template, but the fourth depends on the
+The table is wider than a phone, so the first three columns (the game with its
+spread and result, who to root for and the viewer's own picks) are frozen while the rest scroll sideways.
+Two of those three are fixed by the template, but the third depends on the
 route ordering the players so the viewer comes first — get that wrong and
 everyone compares against whichever player happens to sort first, which is the
 one thing the frozen column is there to prevent.
@@ -201,6 +201,18 @@ def test_a_kicked_off_game_does_not_read_upcoming():
     assert "LIVE" in row, "a game that has kicked off is not marked live"
 
 
+def test_the_result_sits_in_the_game_cell():
+    """There is no Result column; a final's score and cover share the game's cell."""
+    ids = build_week_of_mixed_games()
+    html = client_for(ids["viewer"]).get(f"/picks/week/{ids['week']}/all").text
+    header = html.split("<!-- Pick matrix -->", 1)[1].split("</thead>", 1)[0]
+    assert "Result" not in header, "the matrix still has a Result column"
+    row = html.split('>FIN<', 1)[1].split("</tr>", 1)[0]
+    game_cell = row.split("</td>", 1)[0]
+    assert "17-20" in game_cell and "TWO" in game_cell, \
+        f"the final score and cover are not in the game cell: {game_cell}"
+
+
 def test_the_matrix_comes_before_the_week_standings():
     ids = build_league()
     html = client_for(ids["mira"]).get(f"/picks/week/{ids['week']}/all").text
@@ -212,7 +224,7 @@ def test_the_frozen_columns_and_header_are_marked_up():
     ids = build_league()
     html = client_for(ids["mira"]).get(f"/picks/week/{ids['week']}/all").text
     assert "pm-wrap" in html, "the matrix is not inside the scroll container that the freeze needs"
-    for column in ("pm-c1", "pm-c2", "pm-c3", "pm-c4"):
+    for column in ("pm-c1", "pm-c2", "pm-c3"):
         assert column in html, f"frozen column {column} is missing from the matrix"
     assert "pm-you" in html, "the viewer's column is not tinted as theirs"
 
@@ -260,7 +272,7 @@ def test_root_for_can_be_the_team_you_did_not_pick():
     assert "Root" in html.split("<thead>", 1)[1].split("</thead>", 1)[0], \
         "the matrix has no Root For column"
     row = html.split("<!-- Pick matrix -->", 1)[1].split("<tbody>", 1)[1].split("</tr>", 1)[0]
-    root_cell = row.split("pm-c3", 1)[1].split("</td>", 1)[0]
+    root_cell = row.split("pm-c2", 1)[1].split("</td>", 1)[0]
     assert ">AWY<" in root_cell, f"expected to root for AWY: {root_cell}"
     assert "not your pick" in root_cell, "rooting against your own pick is not flagged"
 

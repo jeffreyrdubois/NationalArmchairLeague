@@ -118,10 +118,11 @@ such edit is recorded in the admin audit log.
 ### Reading the All Picks Grid
 After the lock, `/picks/week/{id}/all` shows every player's picks as one grid —
 one row per game, one column per player. It is wider than a phone screen, so the
-first four columns are frozen: the game (with the spread written under it as the
-favorite and the points they give, e.g. "GB -5.5"), the result, **Root For** and
-**your own picks**, which are pulled to the front and tinted. Scroll sideways and
-those four stay put while the other players slide past, so you are always
+first three columns are frozen: the game, **Root For** and **your own picks**,
+which are pulled to the front and tinted. Under each matchup is its spread, written
+as the favorite and the points they give (e.g. "GB -5.5"), and once the game kicks
+off, its score — marked LIVE while it's being played, and with the team that
+covered once it's final. Scroll sideways and those three stay put while the other players slide past, so you are always
 comparing against your own column. The row of player names and the totals row
 stay put as you scroll up and down.
 
