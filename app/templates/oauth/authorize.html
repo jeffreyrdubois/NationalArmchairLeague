@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Connect Claude &mdash; NAL{% endblock %}
+{% block title %}Connect AI &mdash; NAL{% endblock %}
 
 {% block content %}
 <div class="max-w-md mx-auto bg-white rounded-xl shadow p-6 mt-6">
@@ -13,10 +13,16 @@
     <strong>{{ user.full_name }}</strong>. It will be able to:
   </p>
   <ul class="text-sm text-gray-700 list-disc pl-5 mb-4 space-y-1">
-    <li>read results, standings, awards and league money</li>
+    <li>read results, standings and awards{% if sees_money %}, and league money{% endif %}</li>
     <li>see everyone's picks once a week has locked &mdash; never before</li>
     <li>enter and change your picks until the week locks</li>
   </ul>
+  {% if client.self_registered %}
+  <p class="text-xs text-gray-600 bg-gray-50 border rounded p-2 mb-3">
+    Approving sends you back to <strong class="font-mono">{{ redirect_host }}</strong>.
+    Only allow this if you just started connecting an AI app there yourself.
+  </p>
+  {% endif %}
   <p class="text-xs text-gray-500 mb-5">
     You can disconnect it at any time from Account Settings.
   </p>

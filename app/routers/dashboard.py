@@ -260,10 +260,21 @@ def _render_settings(request: Request, db: Session, user: User, **extra):
     msg = extra.pop("msg", None) or request.query_params.get("msg")
     error = extra.pop("error", None) or request.query_params.get("error")
     may_use_mcp = oauth.may_use_mcp(user)
+    may_manage = oauth.may_manage_clients(user)
     clients = []
-    if may_use_mcp:
-        for client in db.query(OAuthClient).order_by(OAuthClient.created_at).all():
+    self_registered = 0
+    if may_manage:
+        pre_registered = (
+            db.query(OAuthClient)
+            .filter(OAuthClient.self_registered.is_(False))
+            .order_by(OAuthClient.created_at)
+            .all()
+        )
+        for client in pre_registered:
             clients.append({"client": client, "connections": oauth.connections(db, client)})
+        self_registered = (
+            db.query(OAuthClient).filter(OAuthClient.self_registered.is_(True)).count()
+        )
     return templates.TemplateResponse(
         "account/settings.html",
         {
@@ -273,7 +284,10 @@ def _render_settings(request: Request, db: Session, user: User, **extra):
             "msg": msg,
             "error": error,
             "may_use_mcp": may_use_mcp,
+            "may_manage_mcp": may_manage,
+            "mcp_connections": oauth.user_connections(db, user) if may_use_mcp else [],
             "mcp_clients": clients,
+            "mcp_self_registered": self_registered,
             "mcp_url": public_url(request, "/mcp"),
             "default_redirect_uris": "\n".join(oauth.DEFAULT_REDIRECT_URIS),
             # Set only on the response that creates or rotates a secret — the
@@ -293,9 +307,9 @@ async def settings_page(request: Request, db: Session = Depends(get_db)):
 
 
 def _mcp_admin(request: Request, db: Session):
-    """The signed-in user if they may manage Claude connections, else None."""
+    """The signed-in user if they may manage the league's OAuth clients, else None."""
     user = get_current_user(request, db)
-    return user if oauth.may_use_mcp(user) else None
+    return user if oauth.may_manage_clients(user) else None
 
 
 def _mcp_client(db: Session, client_pk: int) -> OAuthClient:
@@ -312,7 +326,7 @@ async def create_mcp_client(
     redirect_uris: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    """Create an OAuth client for Claude.
+    """Create an OAuth client for an AI app.
 
     Rendered straight back rather than redirected: the secret is readable this
     once and never again, and it must not travel in a URL.
@@ -363,7 +377,7 @@ async def disconnect_mcp_client(request: Request, client_pk: int, db: Session = 
     if not user:
         return RedirectResponse(url="/settings", status_code=303)
     oauth.disconnect_all(db, _mcp_client(db, client_pk))
-    return RedirectResponse(url="/settings?msg=Claude+disconnected", status_code=303)
+    return RedirectResponse(url="/settings?msg=Client+disconnected", status_code=303)
 
 
 @router.post("/settings/mcp-clients/{client_pk}/delete")
@@ -373,6 +387,16 @@ async def delete_mcp_client(request: Request, client_pk: int, db: Session = Depe
         return RedirectResponse(url="/settings", status_code=303)
     oauth.delete_client(db, _mcp_client(db, client_pk))
     return RedirectResponse(url="/settings?msg=Client+deleted", status_code=303)
+
+
+@router.post("/settings/mcp-connections/{client_id}/disconnect")
+async def disconnect_my_mcp_connection(request: Request, client_id: str, db: Session = Depends(get_db)):
+    """Sign out one AI app the signed-in person connected — theirs only."""
+    user = get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    oauth.disconnect_user(db, user, client_id)
+    return RedirectResponse(url="/settings?msg=AI+app+disconnected", status_code=303)
 
 
 @router.post("/settings/notifications")

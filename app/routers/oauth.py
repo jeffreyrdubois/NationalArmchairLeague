@@ -1,7 +1,8 @@
-"""OAuth endpoints for connecting Claude to the MCP server.
+"""OAuth endpoints for connecting an AI app to the MCP server.
 
-Discovery (RFC 9728 and RFC 8414 metadata), the approval page at
-``/oauth/authorize``, and the token and revocation endpoints. The flow and
+Discovery (RFC 9728 and RFC 8414 metadata), dynamic client registration
+(RFC 7591) at ``/oauth/register``, the approval page at ``/oauth/authorize``,
+and the token and revocation endpoints. The flow and
 storage live in app/services/oauth.py; this is only the HTTP around it.
 
 Every URL in the metadata is built from the request, so it names the address
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.models import Role
 from app.services import oauth
 from app.templates_config import templates
 from app.utils import public_url
@@ -39,11 +41,12 @@ def authorization_server_metadata(request: Request) -> dict:
         "authorization_endpoint": public_url(request, "/oauth/authorize"),
         "token_endpoint": public_url(request, "/oauth/token"),
         "revocation_endpoint": public_url(request, "/oauth/revoke"),
+        "registration_endpoint": public_url(request, "/oauth/register"),
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
-        "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
-        "revocation_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
+        "token_endpoint_auth_methods_supported": list(oauth.AUTH_METHODS),
+        "revocation_endpoint_auth_methods_supported": list(oauth.AUTH_METHODS),
         "scopes_supported": ["offline_access"],
     }
 
@@ -60,6 +63,24 @@ async def protected_resource(request: Request):
 @router.get("/.well-known/openid-configuration", include_in_schema=False)
 async def authorization_server(request: Request):
     return JSONResponse(authorization_server_metadata(request))
+
+
+# ---------------------------------------------------------------------------
+# Registration: any MCP client may register itself
+# ---------------------------------------------------------------------------
+
+@router.post("/oauth/register")
+async def register(request: Request, db: Session = Depends(get_db)):
+    try:
+        metadata = await request.json()
+    except Exception:
+        metadata = None
+    try:
+        body = oauth.register_client(db, metadata)
+    except oauth.RegistrationError as exc:
+        return _oauth_error(exc.error, exc.description)
+    return JSONResponse(body, status_code=201,
+                        headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
 
 
 # ---------------------------------------------------------------------------
@@ -86,12 +107,15 @@ def _check_request(db: Session, params) -> tuple[oauth.OAuthClient | None, str |
     """Validate an authorization request. Returns (client, error)."""
     client = oauth.get_client(db, params.get("client_id"))
     if not client:
-        return None, "Unknown client. Check the client ID in Claude's connector settings."
+        return None, (
+            "Unknown client. Check the client ID in your AI app's connector "
+            "settings, or remove the connector and add it again."
+        )
     if not oauth.redirect_uri_allowed(client, params.get("redirect_uri")):
+        fix = "" if client.self_registered else " Add it on the Account Settings page."
         return None, (
             "This redirect URI is not registered for the client: "
-            f"{params.get('redirect_uri') or '(none)'}. Add it on the Account "
-            "Settings page."
+            f"{params.get('redirect_uri') or '(none)'}.{fix}"
         )
     return client, None
 
@@ -120,11 +144,17 @@ async def authorize_page(request: Request, db: Session = Depends(get_db)):
         here = request.url.path + "?" + request.url.query
         return RedirectResponse(url="/login?" + urlencode({"next": here}), status_code=303)
     if not oauth.may_use_mcp(user):
-        return _refuse(request, db, "Your account can't connect Claude to the league yet.", 403)
+        return _refuse(request, db, "Your account can't connect an AI app to the league.", 403)
 
     return templates.TemplateResponse(
         "oauth/authorize.html",
-        {"request": request, "user": user, "client": client, "params": dict(params)},
+        {
+            "request": request, "user": user, "client": client, "params": dict(params),
+            # Where the approval goes. For a self-registered client the name is
+            # whatever it chose to call itself, so the host is the real tell.
+            "redirect_host": urlsplit(params["redirect_uri"]).hostname,
+            "sees_money": user.role == Role.admin,
+        },
     )
 
 
@@ -138,7 +168,7 @@ async def authorize_decision(request: Request, db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     if not oauth.may_use_mcp(user):
-        return _refuse(request, db, "Your account can't connect Claude to the league yet.", 403)
+        return _refuse(request, db, "Your account can't connect an AI app to the league.", 403)
     if not form.get("code_challenge"):
         return _client_error(form, "invalid_request", "PKCE with S256 is required.")
 

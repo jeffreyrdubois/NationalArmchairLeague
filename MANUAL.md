@@ -12,7 +12,7 @@
 9. [Money — Prize Payouts & League Funds](#9-money--prize-payouts--league-funds)
 10. [Submitting an Issue](#10-submitting-an-issue)
 11. [Configuration — Environment Variables](#11-configuration--environment-variables)
-12. [Using the League from Claude (MCP)](#12-using-the-league-from-claude-mcp)
+12. [Using the League from Claude or Another AI (MCP)](#12-using-the-league-from-claude-or-another-ai-mcp)
 
 ---
 
@@ -539,42 +539,58 @@ affected until you install it. To go back afterwards, install `latest` again.
 
 ---
 
-## 12. Using the League from Claude (MCP)
+## 12. Using the League from Claude or Another AI (MCP)
 
 The app runs an [MCP](https://modelcontextprotocol.io) server at `/mcp`, so
-Claude can answer questions about the league and fill in your picks. Claude
-connects the standard way for a remote connector — OAuth with a client ID and
-client secret — and for now only **admins** can connect it.
+Claude — or ChatGPT, or any other AI app that supports remote MCP servers — can
+answer questions about the league and fill in your picks. **Every league
+member** can connect their own AI. It acts as you and sees only what you can
+see on the site: players get no league money, and nobody sees anyone else's
+picks before a week locks.
 
 ### Connecting
 
-1. Go to **Account Settings** (`/settings`) → **Claude Access (MCP)** →
-   **Create Client**. The redirect URIs are prefilled for claude.ai, the Claude
-   apps and Claude Code, so the defaults are right. The page then shows the
-   **Server URL**, **Client ID** and **Client secret**. The secret is shown
-   **once**, so copy it then. Only a hash is stored, and a lost secret is
-   replaced with **New Secret**, not recovered.
-2. Add the server to Claude:
+1. Go to **Account Settings** (`/settings`) → **AI Access (MCP)** and copy the
+   **Server URL**.
+2. Add the server to your AI app:
    - **claude.ai / Claude app:** Settings → Connectors → *Add custom
-     connector*: paste the Server URL, and the Client ID and Client secret
-     (under the advanced settings).
-   - **Claude Code:** run the command shown on the settings page —
-     `claude mcp add --transport http --client-id nal_… --client-secret nal https://your-nal-host/mcp`
-     — and paste the secret when asked.
-3. Claude opens this site's **Connect Claude?** page. Log in if asked, then
-   click **Allow**. Claude acts as whoever approves it.
+     connector*: paste the Server URL. Leave the client ID and secret blank.
+   - **Claude Code:** `claude mcp add --transport http nal https://your-nal-host/mcp`
+   - **Anything else:** add a remote MCP server with the Server URL. The app
+     registers itself and signs in with OAuth.
+3. The app opens this site's **Connect …?** page. Log in if asked, check that
+   it names the app you just added, then click **Allow**.
 
-The server has to be reachable from wherever Claude runs. For claude.ai that
+Your connected apps are listed under **Your connected apps** on the settings
+page; **Disconnect** signs one out.
+
+The server has to be reachable from wherever the AI runs. For claude.ai that
 means your public address behind the reverse proxy, not the LAN one. The SWAG
 config in `nginx/` needs no changes.
 
 Access tokens last an hour and are renewed automatically. A connection that
-sits unused for 90 days has to be approved again. **Disconnect All** signs out
-every app using a client, and **Delete** removes the client entirely. Access
-also stops the moment the approving account is deactivated or stops being an
-admin.
+sits unused for 90 days has to be approved again. Access also stops the moment
+the approving account is deactivated.
 
-### What Claude can do
+#### How it stays safe
+
+Anyone can *register* an app with the server (RFC 7591 dynamic client
+registration) — that is what lets it work with just the URL — but a
+registration on its own gets nothing. Every connection needs a league member
+to log in and click **Allow**, the approval only ever goes back to an address
+the app registered (the approval page shows it), and PKCE makes an intercepted
+code useless. Registrations nobody approves are cleared out after a day.
+
+#### Pre-registered clients (admins)
+
+A few apps can't register themselves and want a fixed client ID and secret.
+Admins can create one under **Pre-registered clients** → **Create a client**
+(the redirect URIs are prefilled for claude.ai, the Claude apps and Claude
+Code). The secret is shown **once**; only a hash is stored, and a lost secret
+is replaced with **New Secret**, not recovered. **Disconnect All** signs out
+every app using a client, and **Delete** removes it entirely.
+
+### What your AI can do
 
 | Tool | What it answers |
 |---|---|
@@ -583,7 +599,7 @@ admin.
 | `get_rooting_guide` | For each unfinished game in a locked week, which team actually helps you, for the week and for the season. Your own pick isn't always the answer: if a rival has more points on that team than you, their cover hurts you. |
 | `get_season_standings` | The season leaderboard, with points behind the leader and weeks won. |
 | `get_award_standings` | Each award's rules, prize, leaders and your place. |
-| `get_money_owed` | Prize money each player is owed (earned minus paid, plus season-end projections) and unpaid entry fees. |
+| `get_money_owed` | Prize money each player is owed (earned minus paid, plus season-end projections) and unpaid entry fees. **Admins only.** |
 | `get_pick_sheet` | The open week's games and kickoffs, the currently listed spread for each (both sides' lines, who set it, when it last moved, and whether spreads are locked yet), your current picks, and unused point values. |
 | `submit_picks` | Enter or change picks. Teams can be named by abbreviation or name (`"KC"`, `"Chiefs"`); games you leave out keep their current pick. |
 
@@ -593,7 +609,7 @@ behind you on the points left to play. For the season, they are the nearest
 players above and below you in the standings. It also lists the difference
 against every other player, so you can ask about anyone in particular.
 
-Claude follows the same rules the site does. Nobody's picks, yours excepted,
+The AI follows the same rules the site does. Nobody's picks, yours excepted,
 are visible before a week locks. Picks can't be changed once it has. Every
 point value is used once. A submission that breaks any rule saves nothing.
 
@@ -608,7 +624,7 @@ point value is used once. A submission that breaks any rule saves nothing.
 | All Picks (after lock) / Pick Status (before) | `/picks/week/{id}/all` | All |
 | Standings | `/standings` | All |
 | Submit an Issue | `/feedback` | All |
-| Account Settings (incl. Claude access) | `/settings` | All (Claude access: Admin) |
+| Account Settings (incl. AI access) | `/settings` | All |
 | Spreads | `/admin/spreads` | Contributor+ |
 | Scores | `/admin/scores` | Contributor+ |
 | Admin Panel | `/admin/` | Admin |
