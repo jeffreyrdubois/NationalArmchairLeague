@@ -116,8 +116,8 @@
           class="w-full border rounded px-2 py-1 text-xs font-mono bg-gray-50 mt-1" />
       </li>
       <li>
-        <strong>Any other AI app:</strong> add a remote MCP server with the URL
-        above; it signs in with OAuth.
+        <strong>ChatGPT, Grok or any other AI app:</strong> add a custom
+        connector (remote MCP server) with the URL above; it signs in with OAuth.
       </li>
     </ul>
     <p class="text-xs text-gray-500 mb-4">
@@ -188,7 +188,7 @@
       </div>
       <form method="post" action="/settings/mcp-clients/{{ client.id }}/redirects" class="mb-2">
         <label class="block text-xs text-gray-500 mb-1">Redirect URIs (one per line)</label>
-        <textarea name="redirect_uris" rows="4"
+        <textarea name="redirect_uris" rows="7"
           class="w-full border rounded px-2 py-1 text-xs font-mono">{{ client.redirect_uris }}</textarea>
         <button class="mt-1 bg-gray-200 text-gray-700 text-xs px-3 py-1 rounded hover:bg-gray-300">
           Save Redirect URIs
@@ -221,10 +221,10 @@
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Redirect URIs (one per line)</label>
-          <textarea name="redirect_uris" rows="4"
+          <textarea name="redirect_uris" rows="7"
             class="w-full border rounded px-2 py-1 text-xs font-mono">{{ default_redirect_uris }}</textarea>
           <p class="text-xs text-gray-400 mt-1">
-            The defaults cover claude.ai, the Claude apps and Claude Code.
+            The defaults cover claude.ai, the Claude apps, Claude Code, ChatGPT and Grok.
           </p>
         </div>
         <button class="bg-yellow-400 text-gray-900 text-sm px-4 py-2 rounded font-medium hover:bg-yellow-300">
