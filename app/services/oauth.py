@@ -50,13 +50,17 @@ MAX_SELF_REGISTERED = 500
 
 AUTH_METHODS = ("none", "client_secret_post", "client_secret_basic")
 
-# Where Claude sends the browser back after approval: the claude.ai / Claude
-# app callbacks, and Claude Code's local listener (any port — see
+# Where an AI app sends the browser back after approval: the claude.ai /
+# Claude app callbacks, ChatGPT's connector callback, Grok's (it has used both
+# of these), and a local listener such as Claude Code's (any port — see
 # redirect_uri_allowed). Prefilled for a new client; editable on the settings
 # page.
 DEFAULT_REDIRECT_URIS = [
     "https://claude.ai/api/mcp/auth_callback",
     "https://claude.com/api/mcp/auth_callback",
+    "https://chatgpt.com/connector_platform_oauth_redirect",
+    "https://grok.com/connectors/oauth/callback",
+    "https://grok.com/connectors-oauth-exchange-code/",
     "http://localhost/callback",
     "http://127.0.0.1/callback",
 ]

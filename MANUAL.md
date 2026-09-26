@@ -585,8 +585,8 @@ code useless. Registrations nobody approves are cleared out after a day.
 
 A few apps can't register themselves and want a fixed client ID and secret.
 Admins can create one under **Pre-registered clients** → **Create a client**
-(the redirect URIs are prefilled for claude.ai, the Claude apps and Claude
-Code). The secret is shown **once**; only a hash is stored, and a lost secret
+(the redirect URIs are prefilled for claude.ai, the Claude apps, Claude
+Code, ChatGPT and Grok). The secret is shown **once**; only a hash is stored, and a lost secret
 is replaced with **New Secret**, not recovered. **Disconnect All** signs out
 every app using a client, and **Delete** removes it entirely.
 
