@@ -91,19 +91,65 @@
   </div>
 
   {% if may_use_mcp %}
-  <!-- ── Claude (MCP) access ── -->
+  <!-- ── AI (MCP) access ── -->
   <div class="bg-white rounded-xl shadow p-5 lg:col-span-2">
-    <h2 class="font-semibold text-base mb-1">Claude Access (MCP)</h2>
+    <h2 class="font-semibold text-base mb-1">AI Access (MCP)</h2>
     <p class="text-xs text-gray-500 mb-3">
-      Lets Claude read the league &mdash; results, everyone's picks once a week
-      locks, standings, awards and league money &mdash; and fill in your picks.
-      Add it to Claude as a custom connector with the server URL, client ID and
-      client secret below; Claude then sends you here to log in and approve it,
-      and acts as whoever approved it.
+      Connect Claude, ChatGPT or any other AI app that supports MCP, and it can
+      read the league &mdash; results, standings, awards and everyone's picks
+      once a week locks &mdash; and fill in your picks. It acts as you and sees
+      only what you can see here.
     </p>
     <div class="text-xs text-gray-500 mb-1">Server URL</div>
     <input type="text" readonly value="{{ mcp_url }}" onclick="this.select()"
-      class="w-full border rounded px-2 py-1 text-xs font-mono bg-gray-50 mb-4" />
+      class="w-full border rounded px-2 py-1 text-xs font-mono bg-gray-50 mb-3" />
+    <ul class="text-xs text-gray-600 list-disc pl-5 mb-4 space-y-1">
+      <li>
+        <strong>Claude (claude.ai or the apps):</strong> Settings &rarr; Connectors
+        &rarr; <em>Add custom connector</em>, and paste the server URL. Leave the
+        client ID and secret blank.
+      </li>
+      <li>
+        <strong>Claude Code:</strong>
+        <input type="text" readonly onclick="this.select()"
+          value="claude mcp add --transport http nal {{ mcp_url }}"
+          class="w-full border rounded px-2 py-1 text-xs font-mono bg-gray-50 mt-1" />
+      </li>
+      <li>
+        <strong>Any other AI app:</strong> add a remote MCP server with the URL
+        above; it signs in with OAuth.
+      </li>
+    </ul>
+    <p class="text-xs text-gray-500 mb-4">
+      The app then sends you to this site to log in and click <em>Allow</em>.
+    </p>
+
+    <h3 class="text-sm font-medium mb-2">Your connected apps</h3>
+    {% for row in mcp_connections %}
+    <div class="flex flex-wrap items-center justify-between gap-2 border rounded px-3 py-2 mb-2">
+      <div>
+        <span class="text-sm">{{ row.client.name }}</span>
+        {% if row.last_active %}
+        <span class="text-xs text-gray-500 ml-2">
+          last signed in {{ (row.last_active | eastern).strftime('%b %-d, %-I:%M %p ET') }}
+        </span>
+        {% endif %}
+      </div>
+      <form method="post" action="/settings/mcp-connections/{{ row.client.client_id }}/disconnect"
+        onsubmit="return confirm('Disconnect this app?');">
+        <button class="bg-gray-200 text-gray-700 text-xs px-3 py-1 rounded hover:bg-gray-300">Disconnect</button>
+      </form>
+    </div>
+    {% else %}
+    <p class="text-xs text-gray-400 mb-2">None yet.</p>
+    {% endfor %}
+
+    {% if may_manage_mcp %}
+    <h3 class="text-sm font-medium mt-5 mb-1">Pre-registered clients (admin)</h3>
+    <p class="text-xs text-gray-500 mb-3">
+      Most apps register themselves ({{ mcp_self_registered }} so far). Create a
+      client here only for an app that needs a fixed client ID and secret.
+    </p>
 
     {% if new_secret %}
     <div class="border border-yellow-300 bg-yellow-50 rounded p-3 mb-4">
@@ -150,7 +196,7 @@
       </form>
       <div class="flex gap-2 flex-wrap">
         <form method="post" action="/settings/mcp-clients/{{ client.id }}/rotate"
-          onsubmit="return confirm('Issue a new secret? Claude will need the new one the next time it signs in.');">
+          onsubmit="return confirm('Issue a new secret? Apps using this client will need the new one the next time they sign in.');">
           <button class="bg-gray-900 text-white text-xs px-3 py-1.5 rounded hover:bg-gray-700">New Secret</button>
         </form>
         <form method="post" action="/settings/mcp-clients/{{ client.id }}/disconnect"
@@ -165,7 +211,7 @@
     </div>
     {% endfor %}
 
-    <details {% if not mcp_clients %}open{% endif %} class="mt-2">
+    <details class="mt-2">
       <summary class="text-sm font-medium cursor-pointer">Create a client</summary>
       <form method="post" action="/settings/mcp-clients" class="mt-2 space-y-2">
         <div>
@@ -186,6 +232,7 @@
         </button>
       </form>
     </details>
+    {% endif %}
   </div>
   {% endif %}
 

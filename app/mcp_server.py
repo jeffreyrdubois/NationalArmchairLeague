@@ -1,4 +1,4 @@
-"""The league's MCP server, so Claude can read the league and enter picks.
+"""The league's MCP server, so an AI app can read the league and enter picks.
 
 Mounted on the main app at ``/mcp`` (Streamable HTTP, stateless, JSON
 responses — nothing to keep alive between calls, and nothing extra for the

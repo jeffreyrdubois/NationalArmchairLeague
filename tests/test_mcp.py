@@ -3,9 +3,10 @@
 These speak real MCP over HTTP to the real endpoint, the way Claude does, so
 they cover the three things that matter:
 
-1. **Nobody gets in without going through OAuth** — a registered client, its
-   secret, PKCE, and a person who may connect approving it — and a token only
-   works while that person still may.
+1. **Nobody gets in without going through OAuth** — a registered client
+   (self-registered or admin-made), PKCE, and a league member approving it —
+   and a token only works while that person still may. Any member may
+   connect; a player's connection sees only what that player can.
 2. **Pick secrecy survives a new door.** Before a week locks, the results tool
    shows who has submitted, never what anyone picked — the same rule the site
    enforces in app/services/visibility.py.
@@ -221,7 +222,8 @@ def test_discovery_metadata(client, ids):
     assert server["authorization_endpoint"] == "http://testserver/oauth/authorize"
     assert server["token_endpoint"] == "http://testserver/oauth/token"
     assert server["code_challenge_methods_supported"] == ["S256"]
-    assert "registration_endpoint" not in server
+    assert server["registration_endpoint"] == "http://testserver/oauth/register"
+    assert "none" in server["token_endpoint_auth_methods_supported"]
 
 
 def create_client_as_admin(client, ids):
@@ -270,15 +272,17 @@ def code_from(resp):
     return query
 
 
-def connect(client, ids, client_id, secret):
+def connect(client, ids, client_id, secret, who="admin"):
     """The whole flow Claude runs; returns the token response."""
     verifier, challenge = pkce()
-    code = code_from(authorize(client, ids["admin"], client_id, challenge))["code"]
-    resp = client.post("/oauth/token", data={
+    code = code_from(authorize(client, ids[who], client_id, challenge))["code"]
+    form = {
         "grant_type": "authorization_code", "code": code,
-        "redirect_uri": CALLBACK, "code_verifier": verifier,
-        "client_id": client_id, "client_secret": secret,
-    })
+        "redirect_uri": CALLBACK, "code_verifier": verifier, "client_id": client_id,
+    }
+    if secret:
+        form["client_secret"] = secret
+    resp = client.post("/oauth/token", data=form)
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -361,18 +365,114 @@ def test_login_returns_to_the_approval_page(client, ids):
     assert safe_next("https://evil.example") is None
 
 
-def test_players_cannot_connect_yet(client, ids, client_id, secret):
-    verifier, challenge = pkce()
-    page = authorize(client, ids["player"], client_id, challenge)
-    assert page.status_code == 403
+def register(client, **metadata):
+    body = {"client_name": "Some AI", "redirect_uris": [CALLBACK], **metadata}
+    return client.post("/oauth/register", json=body)
 
-    # Nor does a token made behind the approval page's back work.
+
+def test_any_app_can_register_itself(client, ids):
+    # A public client — what claude.ai and most MCP clients register as.
+    resp = register(client, token_endpoint_auth_method="none",
+                    grant_types=["authorization_code", "refresh_token"])
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["client_id"].startswith("nal_") and "client_secret" not in body
+
+    # The approval page names where the code will go.
+    verifier, challenge = pkce()
+    client.cookies.set("access_token", create_access_token(ids["player"]))
+    page = client.get("/oauth/authorize", params={
+        "response_type": "code", "client_id": body["client_id"],
+        "redirect_uri": CALLBACK, "state": "xyz",
+        "code_challenge": challenge, "code_challenge_method": "S256",
+    })
+    client.cookies.clear()
+    assert page.status_code == 200 and "claude.ai" in page.text
+    assert "league money" not in page.text  # players never see the money
+
+    # No secret needed at the token endpoint; PKCE still is.
+    tokens = connect(client, ids, body["client_id"], None, who="player")
+    assert rpc(client, tokens["access_token"], "tools/list")["tools"]
+    code = code_from(authorize(client, ids["player"], body["client_id"], challenge))["code"]
+    bad = client.post("/oauth/token", data={
+        "grant_type": "authorization_code", "code": code, "redirect_uri": CALLBACK,
+        "code_verifier": "wrong", "client_id": body["client_id"],
+    })
+    assert bad.json()["error"] == "invalid_grant"
+
+    # A confidential registration gets a secret, and must use it.
+    conf = register(client).json()
+    assert conf["client_secret"].startswith("nalsec_")
+    verifier, challenge = pkce()
+    code = code_from(authorize(client, ids["admin"], conf["client_id"], challenge))["code"]
+    bad = client.post("/oauth/token", data={
+        "grant_type": "authorization_code", "code": code, "redirect_uri": CALLBACK,
+        "code_verifier": verifier, "client_id": conf["client_id"],
+    })
+    assert bad.status_code == 401
+    assert connect(client, ids, conf["client_id"], conf["client_secret"])["access_token"]
+
+    # Registrations that could send a code somewhere unsafe are refused.
+    for bad_meta in [
+        {"redirect_uris": ["http://evil.example/cb"]},
+        {"redirect_uris": []},
+        {"redirect_uris": "https://claude.ai/cb"},
+        {"token_endpoint_auth_method": "private_key_jwt"},
+        {"grant_types": ["client_credentials"]},
+        {"response_types": ["token"]},
+    ]:
+        resp = register(client, **bad_meta)
+        assert resp.status_code == 400, (bad_meta, resp.text)
+    assert client.post("/oauth/register", content=b"nope").status_code == 400
+
+    # A registration's redirect URIs are exactly what it may use.
+    page = authorize(client, ids["player"], body["client_id"], challenge,
+                     redirect_uri="https://evil.example/callback")
+    assert page.status_code == 400 and "not registered" in page.text
+
+
+def test_unused_registrations_are_pruned(client, ids):
+    stale = register(client, token_endpoint_auth_method="none").json()["client_id"]
+    used = register(client, token_endpoint_auth_method="none").json()["client_id"]
+    connect(client, ids, used, None, who="player")
     db = SessionLocal()
-    oc = db.query(OAuthClient).filter(OAuthClient.client_id == client_id).one()
-    token = oauth._issue(db, oauth.ACCESS, oc, db.get(User, ids["player"]), oauth.ACCESS_TTL)
+    long_ago = datetime.utcnow() - timedelta(days=2)
+    for row in db.query(OAuthClient).filter(OAuthClient.client_id.in_([stale, used])):
+        row.created_at = long_ago
     db.commit()
+    oauth.prune_registrations(db)
+    left = {c for (c,) in db.query(OAuthClient.client_id)}
     db.close()
+    assert stale not in left and used in left
+
+
+def test_players_connect_and_see_only_what_they_can(client, ids, client_id, secret):
+    tokens = connect(client, ids, client_id, secret, who="player")
+    token = tokens["access_token"]
+    assert "admins only" in err(client, token, "get_money_owed")
+    sheet = ok(client, token, "get_pick_sheet")
+    mine = {g["matchup"]: g.get("your_pick") for g in sheet["games"]}
+    assert mine["GB @ CHI"] == {"team": "GB", "points": 16}
+
+    # The settings page lists the connection, and its owner can end it.
+    client.cookies.set("access_token", create_access_token(ids["player"]))
+    page = client.get("/settings")
+    assert "AI Access (MCP)" in page.text and "Claude" in page.text
+    assert "Pre-registered clients" not in page.text
+    # ...but can't make or manage the league's clients.
+    before = SessionLocal().query(OAuthClient).count()
+    client.post("/settings/mcp-clients", data={"name": "x", "redirect_uris": CALLBACK})
+    assert SessionLocal().query(OAuthClient).count() == before
+    resp = client.post(f"/settings/mcp-connections/{client_id}/disconnect",
+                       follow_redirects=False)
+    client.cookies.clear()
+    assert resp.status_code == 303
     assert rpc(client, token, "tools/list", raw=True).status_code == 401
+    fresh = client.post("/oauth/token", data={
+        "grant_type": "refresh_token", "refresh_token": tokens["refresh_token"],
+        "client_id": client_id, "client_secret": secret,
+    })
+    assert fresh.json()["error"] == "invalid_grant"
 
 
 def test_open_week_results_show_submissions_not_picks(client, token):
@@ -564,7 +664,9 @@ if __name__ == "__main__":
         client_id, secret, token = test_full_oauth_flow_connects_claude(client, ids)
         test_oauth_refuses_what_it_should(client, ids, client_id, secret)
         test_login_returns_to_the_approval_page(client, ids)
-        test_players_cannot_connect_yet(client, ids, client_id, secret)
+        test_any_app_can_register_itself(client, ids)
+        test_unused_registrations_are_pruned(client, ids)
+        test_players_connect_and_see_only_what_they_can(client, ids, client_id, secret)
         test_open_week_results_show_submissions_not_picks(client, token)
         test_week_results_default_to_latest_locked_week(client, token)
         test_season_standings(client, token)

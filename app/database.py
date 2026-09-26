@@ -71,6 +71,42 @@ def _migrate():
                 "NOT NULL DEFAULT 'clinched'"
             ))
 
+        # --- oauth_clients table ---
+        # Self-registered clients have no secret and no admin behind them, so
+        # both columns became nullable. SQLite can't drop a NOT NULL in place:
+        # rebuild the table (its client_id is what oauth_tokens points at, and
+        # it is copied unchanged).
+        client_info = conn.execute(text("PRAGMA table_info(oauth_clients)")).fetchall()
+        client_cols = {row[1]: row for row in client_info}
+        if client_cols and "self_registered" not in client_cols:
+            conn.execute(text("""
+                CREATE TABLE oauth_clients_new (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    client_id VARCHAR(64) NOT NULL,
+                    secret_hash VARCHAR(64),
+                    name VARCHAR(100) NOT NULL,
+                    redirect_uris TEXT NOT NULL,
+                    created_by_id INTEGER REFERENCES users (id),
+                    self_registered BOOLEAN NOT NULL DEFAULT 0,
+                    created_at DATETIME DEFAULT (CURRENT_TIMESTAMP),
+                    last_used_at DATETIME
+                )
+            """))
+            conn.execute(text("""
+                INSERT INTO oauth_clients_new
+                    (id, client_id, secret_hash, name, redirect_uris,
+                     created_by_id, self_registered, created_at, last_used_at)
+                SELECT id, client_id, secret_hash, name, redirect_uris,
+                       created_by_id, 0, created_at, last_used_at
+                FROM oauth_clients
+            """))
+            conn.execute(text("DROP TABLE oauth_clients"))
+            conn.execute(text("ALTER TABLE oauth_clients_new RENAME TO oauth_clients"))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX ix_oauth_clients_client_id ON oauth_clients (client_id)"
+            ))
+            conn.execute(text("CREATE INDEX ix_oauth_clients_id ON oauth_clients (id)"))
+
         conn.commit()
 
 

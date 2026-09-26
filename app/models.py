@@ -388,26 +388,40 @@ class PayoutRule(Base):
 
 
 class OAuthClient(Base):
-    """An OAuth client allowed to connect Claude to the MCP server.
+    """An OAuth client allowed to connect an AI app to the MCP server.
 
-    Created by an admin on the settings page; the client ID and secret are what
-    get pasted into Claude's custom-connector settings. Only a hash of the
-    secret is kept — it is shown once, and a lost one is replaced.
+    Two kinds. An admin can create one on the settings page and paste its
+    client ID and secret into the app's connector settings. Or an app can
+    register itself at ``/oauth/register`` (RFC 7591 dynamic registration),
+    which is what lets anyone in the league connect Claude, ChatGPT or any
+    other MCP client with nothing but the server URL. A self-registered client
+    is usually public — no secret, PKCE alone guards its codes. Either way a
+    client gets nothing until a league member logs in and approves it.
+
+    Only a hash of a secret is kept — it is shown once, and a lost one is
+    replaced.
     """
     __tablename__ = "oauth_clients"
 
     id = Column(Integer, primary_key=True, index=True)
     client_id = Column(String(64), unique=True, nullable=False, index=True)
-    secret_hash = Column(String(64), nullable=False)
+    # Null for a public client, which authenticates with its client ID alone.
+    secret_hash = Column(String(64))
     name = Column(String(100), nullable=False)
     # One per line. The authorize endpoint only ever sends a code back to one
     # of these, which is what stops a stolen client ID being any use.
     redirect_uris = Column(Text, nullable=False)
-    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # Null for a self-registered client.
+    created_by_id = Column(Integer, ForeignKey("users.id"))
+    self_registered = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, server_default=func.now())
     last_used_at = Column(DateTime)
 
     created_by = relationship("User")
+
+    @property
+    def is_public(self) -> bool:
+        return not self.secret_hash
 
     @property
     def redirect_uri_list(self) -> list[str]:
