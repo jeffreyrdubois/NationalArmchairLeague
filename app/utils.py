@@ -48,6 +48,35 @@ def ordinal(n: int) -> str:
     return f"{n}{_ORDINAL_SUFFIX.get(n % 10, 'th')}"
 
 
+# How a player wants prize money sent. Distinct from the commissioner's own
+# Venmo/Zelle/Cash App handles, which are how players pay the league.
+PAYMENT_METHODS = (
+    ("zelle", "Zelle"),
+    ("venmo", "Venmo"),
+    ("cashapp", "Cash App"),
+)
+_PAYMENT_METHOD_LABELS = dict(PAYMENT_METHODS)
+
+
+def payment_method_label(code: str | None) -> str:
+    return _PAYMENT_METHOD_LABELS.get(code or "", "")
+
+
+def normalize_payment_method(value: str | None) -> str | None:
+    """A preferred payout rail, or None when nobody has picked one.
+
+    Blank clears the preference. Anything other than Zelle, Venmo, or Cash
+    App is refused — the forms only offer those, so a different value is a
+    tampered request rather than a new method to quietly store.
+    """
+    key = (value or "").strip().casefold()
+    if not key:
+        return None
+    if key not in _PAYMENT_METHOD_LABELS:
+        raise ValueError("Pick Zelle, Venmo, or Cash App.")
+    return key
+
+
 def _as_user(person):
     """A User, or a standings/submission row that carries one."""
     if person is None:

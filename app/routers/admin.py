@@ -21,7 +21,7 @@ from app.services import espn, github_issues, payouts
 from app.services import docker_api, registry, selfupdate
 from app.services.awards import AWARD_REGISTRY
 from app.services.scoring import unscore_game, update_game_results
-from app.utils import eastern_to_utc, to_eastern
+from app.utils import eastern_to_utc, normalize_payment_method, payment_method_label, to_eastern
 
 router = APIRouter(prefix="/admin")
 
@@ -1536,6 +1536,55 @@ async def update_fund_settings(
     ))
     db.commit()
     return RedirectResponse(url="/admin/funds?msg=Settings+saved", status_code=303)
+
+
+@router.post("/funds/payment")
+async def set_player_payment_method(
+    request: Request,
+    user_id: int = Form(...),
+    preferred_payment: str = Form(""),
+    anchor: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """Set how a player wants prize money sent, for someone who hasn't yet.
+
+    The player can choose this themselves on Account Settings. This is the
+    same field, so a commissioner who already knows the answer can fill it
+    in — or correct it — without waiting on them.
+    """
+    from urllib.parse import quote
+    import re
+
+    admin = get_current_user(request, db)
+    if not admin or admin.role != Role.admin:
+        raise HTTPException(status_code=403)
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404)
+    try:
+        choice = normalize_payment_method(preferred_payment)
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/admin/funds?error={quote(str(exc))}", status_code=303
+        )
+
+    target.preferred_payment = choice
+    label = payment_method_label(choice)
+    detail = (
+        f"{target.full_name} prefers {label}"
+        if label else f"Cleared the payment preference for {target.full_name}"
+    )
+    db.add(AuditLog(
+        user_id=admin.id, action="set_payment_method",
+        target_type="user", target_id=target.id, detail=detail,
+    ))
+    db.commit()
+    # Land back on the row that was just changed, not the top of a long page.
+    url = f"/admin/funds?msg={quote(detail)}"
+    if re.fullmatch(r"(owe|status)-\d+", anchor or ""):
+        url += f"#{anchor}"
+    return RedirectResponse(url=url, status_code=303)
 
 
 @router.post("/funds/transaction")
