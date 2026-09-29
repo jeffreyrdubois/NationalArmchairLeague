@@ -266,6 +266,56 @@ def build_rooting_week():
     return ids
 
 
+def test_shared_first_names_show_a_last_initial():
+    """Two Stephens must not both read "Stephen" across the top of the grid."""
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    db = SessionLocal()
+    season = Season(year=2033, is_active=True)
+    db.add(season)
+    db.flush()
+    week = Week(
+        season_id=season.id, week_number=1, label="Week 1",
+        first_kickoff=datetime.utcnow() - timedelta(hours=2),
+        is_picks_locked=True,
+    )
+    db.add(week)
+    db.flush()
+    game = Game(
+        week_id=week.id, home_team="HOM", away_team="AWY",
+        kickoff_time=datetime.utcnow() - timedelta(hours=2), spread=-3.0,
+    )
+    db.add(game)
+    db.flush()
+    people = [
+        User(first_name="Stephen", last_name="Davis", email="sd@x.com",
+             password_hash="x", role=Role.player),
+        User(first_name="Stephen", last_name="Miller", email="sm@x.com",
+             password_hash="x", role=Role.player),
+        User(first_name="Mira", last_name="Moth", email="mm@x.com",
+             password_hash="x", role=Role.player),
+    ]
+    db.add_all(people)
+    db.flush()
+    for person in people:
+        db.add(Pick(
+            user_id=person.id, game_id=game.id, week_id=week.id,
+            season_id=season.id, picked_team="HOM", confidence_points=1,
+        ))
+    db.commit()
+    viewer_id = people[2].id
+    week_id = week.id
+    db.close()
+
+    names = header_names(client_for(viewer_id).get(f"/picks/week/{week_id}/all").text)
+    assert names[0] == "You", names
+    assert "Stephen D" in names, names
+    assert "Stephen M" in names, names
+    assert "Mira" not in names, names
+    assert "Stephen" not in names, names
+
+
 def test_root_for_can_be_the_team_you_did_not_pick():
     ids = build_rooting_week()
     html = client_for(ids["viewer"]).get(f"/picks/week/{ids['week']}/all").text

@@ -132,7 +132,7 @@
                    {% if u.id == user.id %}pm-you{% endif %}
                    text-center py-2 sm:py-3 font-medium text-gray-600 text-[10px] sm:text-sm whitespace-nowrap">
           <a href="/profile/{{ u.id }}" class="hover:underline">
-            {% if u.id == user.id %}You{% else %}{{ u.first_name }}{% endif %}
+            {% if u.id == user.id %}You{% else %}{{ player_labels.get(u.id, u.first_name) }}{% endif %}
           </a>
         </th>
         {% endfor %}

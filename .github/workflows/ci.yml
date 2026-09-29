@@ -71,6 +71,12 @@ jobs:
       - name: Test score entry and the score sync
         run: python tests/test_score_entry.py
 
+      # The pick grid and the week chips show a first name only. Two players
+      # with the same first name used to be indistinguishable there; a shared
+      # first name now keeps the first letter of the last name.
+      - name: Test short player names
+        run: python tests/test_short_labels.py
+
       # The all-picks grid freezes the viewer's own column, which only works if
       # the route orders the players with the viewer first — a plain-looking
       # line that the whole side-by-side comparison rests on.
