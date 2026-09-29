@@ -48,6 +48,81 @@ def ordinal(n: int) -> str:
     return f"{n}{_ORDINAL_SUFFIX.get(n % 10, 'th')}"
 
 
+def _as_user(person):
+    """A User, or a standings/submission row that carries one."""
+    if person is None:
+        return None
+    if isinstance(person, dict):
+        user = person.get("user")
+        if user is not None and hasattr(user, "first_name"):
+            return user
+        return None
+    nested = getattr(person, "user", None)
+    if nested is not None and hasattr(nested, "first_name"):
+        return nested
+    if hasattr(person, "first_name") and hasattr(person, "id"):
+        return person
+    return None
+
+
+def _last_fragment(user, group) -> str:
+    """Enough of the last name to tell ``user`` apart from ``group``.
+
+    One letter when that is unique ("D"), more when two people share it
+    ("Da" / "Di"). The first letter is capitalised; the rest keeps the
+    spelling on the account.
+    """
+    last = (user.last_name or "").strip()
+    if not last:
+        return ""
+    n = 1
+    while n < len(last):
+        prefix = last[:n].casefold()
+        rivals = [
+            other for other in group
+            if (other.last_name or "").strip()[:n].casefold() == prefix
+        ]
+        if len(rivals) == 1:
+            break
+        n += 1
+    shown = last[:n]
+    return shown[0].upper() + shown[1:]
+
+
+def short_labels(people) -> dict[int, str]:
+    """How to show each player when the page only has room for a first name.
+
+    A first name that belongs to one person stays as it is: "Jeffrey".
+    A first name shared by two or more gains the first letter of the last
+    name, so the two Stephens read "Stephen D" and "Stephen M" instead of
+    both reading "Stephen". Comparison ignores case. If the last initial
+    is shared too, more of the last name is kept until the labels differ.
+    """
+    users = []
+    seen = set()
+    for person in people or ():
+        user = _as_user(person)
+        if user is None or user.id in seen:
+            continue
+        seen.add(user.id)
+        users.append(user)
+
+    groups: dict[str, list] = {}
+    for user in users:
+        groups.setdefault((user.first_name or "").casefold(), []).append(user)
+
+    labels: dict[int, str] = {}
+    for group in groups.values():
+        if len(group) == 1:
+            labels[group[0].id] = group[0].first_name or ""
+            continue
+        for user in group:
+            fragment = _last_fragment(user, group)
+            first = user.first_name or ""
+            labels[user.id] = f"{first} {fragment}".strip()
+    return labels
+
+
 def public_url(request, path: str) -> str:
     """An absolute URL for ``path`` as the outside world reaches this app.
 

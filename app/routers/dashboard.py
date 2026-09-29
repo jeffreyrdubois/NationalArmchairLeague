@@ -7,7 +7,7 @@ from app.database import get_db
 from app.models import Season, Week, Game, Pick, User, PushSubscription, Transaction, AppSetting, OAuthClient
 from app.auth import get_current_user, verify_password, hash_password
 from app.services import oauth
-from app.utils import public_url
+from app.utils import public_url, short_labels
 from app.services.scoring import get_week_standings, get_season_standings
 from app.services.visibility import (
     can_see_picks,
@@ -140,6 +140,11 @@ async def standings_page(
 
     all_seasons = db.query(Season).order_by(Season.year.desc()).all()
     season_standings = get_season_standings(db, season.id)
+    # Labels for the tight spots (week chips, who's-in chips). A shared first
+    # name picks up a last initial so the two Stephens are not both "Stephen".
+    # Built from the whole active roster, not just whoever appears in one
+    # week, so a name reads the same wherever it shows up.
+    roster = db.query(User).filter(User.is_active == True).all()  # noqa: E712
 
     weeks = (
         db.query(Week)
@@ -174,6 +179,10 @@ async def standings_page(
             "season_standings": season_standings,
             "week_data": week_data,
             "weeks": weeks,
+            "player_labels": short_labels([
+                *roster,
+                *(row["user"] for wd in week_data for row in wd["standings"]),
+            ]),
         },
     )
 

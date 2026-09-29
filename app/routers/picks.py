@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models import Season, Week, Game, Pick, User, AuditLog
 from app.auth import get_current_user, require_user
 from app.services.visibility import get_submission_status, picks_are_revealed
+from app.utils import short_labels
 
 router = APIRouter()
 
@@ -328,5 +329,6 @@ async def all_picks_for_week(
             "root_for_game": root_for_game,
             "submission_status": submission_status,
             "submitted_count": sum(1 for r in submission_status if r["is_complete"]),
+            "player_labels": short_labels(users),
         },
     )
