@@ -57,6 +57,10 @@ class User(Base):
     # Notification preferences (all on by default)
     notif_picks_reminder = Column(Boolean, default=True)   # 2 hrs before picks lock
     notif_week_results = Column(Boolean, default=True)     # when week is scored
+    # How this player wants prize money sent: "zelle", "venmo", "cashapp", or
+    # nothing until they (or an admin) pick one. Not the commissioner's
+    # receiving handles — those live in fund settings.
+    preferred_payment = Column(String(20))
     created_at = Column(DateTime, server_default=func.now())
 
     picks = relationship("Pick", back_populates="user")

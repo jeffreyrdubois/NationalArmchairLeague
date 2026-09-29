@@ -352,7 +352,12 @@ banner at the top is the short version: "3 players are waiting on a total of $30
 - **Log $15.00** next to a player records that payment in one click.
 - **Log all 3 payouts** does the whole round at once.
 
-Both only write the payment down — the money still leaves by Venmo or by hand.
+Both only write the payment down — the money still leaves by Venmo, Zelle, Cash App, or by hand.
+
+**Pay via**, next to each player, is how they want that money sent: Zelle, Venmo, or Cash App.
+Players choose this on **Account Settings**. You can set or change it in this column — and
+again under **Player Status**, which lists the whole roster — for anyone who has not picked
+one, or when you already know the answer.
 
 **Weekly Prize Winners** lists each finished week's winners and amounts, most recent
 first, so you can see at a glance who to pay this week.

@@ -47,6 +47,10 @@ def _migrate():
             conn.execute(text("ALTER TABLE users ADD COLUMN notif_picks_reminder BOOLEAN DEFAULT 1"))
         if "notif_week_results" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN notif_week_results BOOLEAN DEFAULT 1"))
+        # How a player wants prize money sent. Null until they pick one, so
+        # existing accounts simply read "not set" rather than a guessed rail.
+        if "preferred_payment" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN preferred_payment VARCHAR(20)"))
 
         # --- games table ---
         game_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(games)")).fetchall()}

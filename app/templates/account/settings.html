@@ -52,6 +52,33 @@
     </form>
   </div>
 
+  <!-- ── How prize money should be sent ── -->
+  <div class="bg-white rounded-xl shadow p-5">
+    <h2 class="font-semibold text-base mb-1">How you want to be paid</h2>
+    <p class="text-xs text-gray-500 mb-4">
+      When the league owes you prize money, this is how it should be sent.
+    </p>
+    <form method="post" action="/settings/payment" class="space-y-3">
+      {% for code, label in payment_methods %}
+      <label class="flex items-center gap-3 cursor-pointer">
+        <input type="radio" name="preferred_payment" value="{{ code }}"
+          {% if user.preferred_payment == code %}checked{% endif %}
+          class="w-4 h-4 accent-yellow-400" />
+        <span class="text-sm font-medium">{{ label }}</span>
+      </label>
+      {% endfor %}
+      <label class="flex items-center gap-3 cursor-pointer">
+        <input type="radio" name="preferred_payment" value=""
+          {% if not user.preferred_payment %}checked{% endif %}
+          class="w-4 h-4 accent-yellow-400" />
+        <span class="text-sm font-medium text-gray-600">No preference</span>
+      </label>
+      <button class="mt-2 bg-gray-900 text-white text-sm px-4 py-2 rounded hover:bg-gray-700">
+        Save Payment Method
+      </button>
+    </form>
+  </div>
+
   <!-- ── Browser Push Notifications ── -->
   <div class="bg-white rounded-xl shadow p-5">
     <h2 class="font-semibold text-base mb-1">Browser Push Notifications</h2>

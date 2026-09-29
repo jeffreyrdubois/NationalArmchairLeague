@@ -7,7 +7,7 @@ from app.database import get_db
 from app.models import Season, Week, Game, Pick, User, PushSubscription, Transaction, AppSetting, OAuthClient
 from app.auth import get_current_user, verify_password, hash_password
 from app.services import oauth
-from app.utils import public_url, short_labels
+from app.utils import public_url, short_labels, normalize_payment_method
 from app.services.scoring import get_week_standings, get_season_standings
 from app.services.visibility import (
     can_see_picks,
@@ -423,6 +423,26 @@ async def save_notification_prefs(
     user.notif_week_results = notif_week_results == "on"
     db.commit()
     return RedirectResponse(url="/settings?msg=Notification+preferences+saved", status_code=303)
+
+
+@router.post("/settings/payment")
+async def save_payment_preference(
+    request: Request,
+    preferred_payment: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """Which rail prize money should be sent on: Zelle, Venmo, or Cash App."""
+    from urllib.parse import quote
+
+    user = get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    try:
+        user.preferred_payment = normalize_payment_method(preferred_payment)
+    except ValueError as exc:
+        return RedirectResponse(url=f"/settings?error={quote(str(exc))}", status_code=303)
+    db.commit()
+    return RedirectResponse(url="/settings?msg=Payment+preference+saved", status_code=303)
 
 
 @router.post("/settings/change-password")
