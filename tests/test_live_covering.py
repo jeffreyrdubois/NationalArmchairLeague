@@ -9,6 +9,7 @@ keeps the settled green or red.
 Run with: python tests/test_live_covering.py
 """
 import os
+import re
 import sys
 import tempfile
 from datetime import datetime, timedelta
@@ -107,10 +108,15 @@ def test_pages_outline_only_your_live_pick():
     assert "pick-live-ahead" in home and "Covering" in home
     assert "pick-live-behind" in home and "Not covering" in home
     assert "pick-pending" in home, "a game with no score stays pending"
+    assert "#fef2f2" not in home and "#f0fdf4" not in home, "a live card must not be filled in"
 
     grid = client.get(f"/picks/week/{week_id}/all").text
     assert grid.count('title="Covering on the current score"') == 1
     assert grid.count('title="Not covering on the current score"') == 1
+    # Earned is only finished games. Pending is what the week would be if every
+    # game already in progress ended at the current score.
+    assert re.findall(r'pm-earned">(\d+)', grid) == ["0", "0"]
+    assert re.findall(r'pm-pending[^"]*">(\d+)', grid) == ["1", "2"]
 
 
 if __name__ == "__main__":
