@@ -420,8 +420,8 @@ any value, recreate the container so it's picked up — run `./update.sh` (or
 ### Updating the app (Unraid / Docker)
 
 Every merge to `main` publishes a ready-built image to the GitHub Container
-Registry (`ghcr.io/jeffreyrdubois/nationalarmchairleague:latest`), for both
-amd64 and arm64. Updating pulls that image — there is nothing to compile on the
+Registry (`ghcr.io/jeffreyrdubois/nationalarmchairleague:latest`), for amd64.
+Updating pulls that image — there is nothing to compile on the
 server, so an update takes seconds rather than minutes.
 
 **From the app itself** — Admin Panel → **Update the App** (`/admin/update`).
@@ -516,7 +516,7 @@ own.
 
 **Trying a branch before you merge it.** Pull requests are built and tested by
 CI but deliberately *not* published — every push to every branch would be
-another multi-arch build and another image in the registry, for branches most of
+another published image in the registry, for branches most of
 which are never installed. So a branch build is published only when you ask for
 one:
 
