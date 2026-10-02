@@ -5,7 +5,7 @@
 #
 #     ./update.sh
 #
-# There is nothing to build: every merge to main publishes a multi-arch image
+# There is nothing to build: every merge to main publishes an amd64 image
 # to ghcr.io, so an update is a pull and a restart. Works with Docker Compose v2
 # ("docker compose"), the standalone "docker-compose" binary, or plain docker if
 # no Compose is installed. Your SQLite database (./data) and your .env are left

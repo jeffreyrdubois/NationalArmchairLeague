@@ -1,10 +1,9 @@
 # National Armchair League — one container, no external services.
 #
 # Debian slim rather than Alpine: every dependency here (cryptography, bcrypt,
-# uvloop, httptools) ships manylinux wheels for both amd64 and arm64, so the
-# image builds in seconds on each architecture instead of compiling C on an
-# emulated arm64 runner. Not distroless: Unraid's container "Console" button
-# needs a shell, and PUID/PGID support needs a root phase before dropping
+# uvloop, httptools) ships a manylinux wheel for amd64, so the image installs
+# them instead of compiling C. Not distroless: Unraid's container "Console"
+# button needs a shell, and PUID/PGID support needs a root phase before dropping
 # privileges.
 
 # ---------------------------------------------------------------------------
@@ -14,7 +13,7 @@ FROM python:3.12-slim AS deps
 
 # Kept so a missing wheel degrades to a slower build rather than a failed one.
 # In practice nothing compiles: all four native dependencies resolve to wheels
-# on both published architectures.
+# for the published architecture (linux/amd64).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential libffi-dev \
  && rm -rf /var/lib/apt/lists/*

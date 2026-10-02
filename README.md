@@ -6,7 +6,7 @@ Read [MANUAL.md](MANUAL.md) for how to play and how to run it.
 
 ## Running it
 
-Every merge to `main` publishes a multi-arch image (amd64 + arm64) to the GitHub
+Every merge to `main` publishes an amd64 image to the GitHub
 Container Registry, so there is nothing to build:
 
     ghcr.io/jeffreyrdubois/nationalarmchairleague:latest
