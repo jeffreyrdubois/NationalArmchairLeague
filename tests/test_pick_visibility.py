@@ -210,6 +210,77 @@ def test_picks_are_revealed_once_the_week_locks():
     assert leaked_picks(html) == PICKED_TEAMS, "profile stayed hidden after the lock"
 
 
+def test_standings_lists_newest_week_first_and_skips_future():
+    """The week-by-week list reads backwards, and weeks still ahead are absent.
+
+    The week open for picks stays even while its kickoff is in the future, and
+    even when the previous week has not yet been flagged complete.
+    """
+    def league(past_completed):
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+        db = SessionLocal()
+        year = next(_next_year)
+        season = Season(year=year, is_active=True)
+        db.add(season)
+        db.flush()
+        now = datetime.utcnow()
+        past = Week(
+            season_id=season.id, week_number=1, label="WKPAST",
+            first_kickoff=now - timedelta(days=7),
+            is_picks_locked=True, is_completed=past_completed,
+        )
+        open_week = Week(
+            season_id=season.id, week_number=2, label="WKOPEN",
+            first_kickoff=now + timedelta(days=2),
+            is_picks_locked=False, is_completed=False,
+        )
+        later = Week(
+            season_id=season.id, week_number=3, label="WKLATER",
+            first_kickoff=now + timedelta(days=9),
+            is_picks_locked=False, is_completed=False,
+        )
+        db.add_all([past, open_week, later])
+        db.flush()
+        past_game = Game(
+            week_id=past.id, home_team="QQA", away_team="O0",
+            kickoff_time=now - timedelta(days=7), spread=-3.0, is_final=True,
+        )
+        db.add(past_game)
+        db.add(Game(
+            week_id=open_week.id, home_team="HOM", away_team="AWY",
+            kickoff_time=now + timedelta(days=2), spread=-3.0,
+        ))
+        db.add(Game(
+            week_id=later.id, home_team="FUT", away_team="URE",
+            kickoff_time=now + timedelta(days=9), spread=-3.0,
+        ))
+        db.flush()
+        alice = User(
+            first_name="Alice", last_name="Ant", email=f"a{year}@x.com",
+            password_hash="x", role=Role.player,
+        )
+        db.add(alice)
+        db.flush()
+        db.add(Pick(
+            user_id=alice.id, game_id=past_game.id, week_id=past.id,
+            season_id=season.id, picked_team="QQA", confidence_points=1,
+            is_correct=True, points_earned=1,
+        ))
+        db.commit()
+        user_id = alice.id
+        db.close()
+        return user_id
+
+    for past_completed in (True, False):
+        html = client_for(league(past_completed)).get("/standings").text
+        assert "WKOPEN" in html and "WKPAST" in html
+        assert "WKLATER" not in html, "a future week was listed on standings"
+        assert html.index("WKOPEN") < html.index("WKPAST"), (
+            "weeks are still oldest-first"
+        )
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failures = 0

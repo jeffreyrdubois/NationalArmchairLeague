@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from app.templates_config import templates
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse
@@ -118,6 +120,36 @@ async def home(request: Request, db: Session = Depends(get_db)):
     )
 
 
+def _week_has_begun(week: Week, now: datetime) -> bool:
+    """True once a week is no longer in the future.
+
+    A week has begun when its first game has kicked off, picks have locked, or
+    it has been marked complete. A week with no kickoff time has not begun.
+    """
+    if week.is_completed or week.is_picks_locked:
+        return True
+    return week.first_kickoff is not None and week.first_kickoff <= now
+
+
+def weeks_for_standings(weeks: list, now: datetime = None) -> list:
+    """Weeks to list under the season table, newest first.
+
+    ``weeks`` must be in week-number order. Every week that has already begun
+    is included. The next one — the week currently open for picks — stays too,
+    even while its first kickoff is still ahead, so the "who's in" board does
+    not disappear between weeks. Anything after that has not started and is
+    left off.
+    """
+    now = now or datetime.utcnow()
+    begun = [w for w in weeks if _week_has_begun(w, now)]
+    upcoming = [w for w in weeks if not _week_has_begun(w, now)]
+    shown = list(begun)
+    if upcoming:
+        shown.append(upcoming[0])
+    shown.sort(key=lambda w: w.week_number, reverse=True)
+    return shown
+
+
 @router.get("/standings", response_class=HTMLResponse)
 async def standings_page(
     request: Request,
@@ -156,8 +188,11 @@ async def standings_page(
     # Per-week breakdown. A week whose picks are still hidden has no scores
     # worth showing — every total is zero — so it carries submission status
     # instead: who has their picks in for the week, and who has not.
+    # Newest week first. Weeks that have not started are left off; the one
+    # currently open for picks stays, so "who's in" is still visible before
+    # its first kickoff.
     week_data = []
-    for week in weeks:
+    for week in weeks_for_standings(weeks):
         revealed = picks_are_revealed(week)
         submission = [] if revealed else get_submission_status(db, week)
         week_data.append({

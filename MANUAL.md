@@ -147,7 +147,7 @@ the week before until then.
 ## 5. Standings & Profiles
 
 ### Standings Page (`/standings`)
-The full season leaderboard with a week-by-week breakdown. Use the season dropdown to view past seasons.
+The full season leaderboard, then each week's results newest first. Weeks that have not started yet are left off; the week currently open for picks stays, so you can still see who is in before the first kickoff. Use the season buttons to view past seasons.
 
 ### Player Profiles (`/profile/{id}`)
 Click any player's name in the standings or dashboard to see their pick history for any season.
