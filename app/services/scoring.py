@@ -2,7 +2,7 @@
 Scoring engine: determines winners against the spread and awards points.
 """
 import logging
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from app.models import Game, Pick, Week, Season
 
 logger = logging.getLogger(__name__)
@@ -155,6 +155,7 @@ def get_week_standings(db: Session, week_id: int) -> list[dict]:
     users_picks = {}
     picks = (
         db.query(Pick)
+        .options(joinedload(Pick.game))
         .filter(Pick.week_id == week_id)
         .all()
     )
@@ -168,10 +169,14 @@ def get_week_standings(db: Session, week_id: int) -> list[dict]:
                 "wrong": 0,
                 "pending": 0,
                 "outstanding": 0.0,
+                # Points the live score would add if those games ended now.
+                "live": 0.0,
             }
         if pick.is_correct is None:
             users_picks[uid]["pending"] += 1
             users_picks[uid]["outstanding"] += pick.confidence_points or 0
+            if live_covering(pick, pick.game):
+                users_picks[uid]["live"] += pick.confidence_points or 0
         elif pick.is_correct:
             users_picks[uid]["correct"] += 1
             users_picks[uid]["total"] += pick.points_earned or 0
@@ -180,8 +185,12 @@ def get_week_standings(db: Session, week_id: int) -> list[dict]:
 
     # Potential = points already banked plus everything still up for grabs,
     # i.e. the most this player can finish the week with.
+    # pending_total = what the week would stand at if every game already
+    # being played ended at the current score. Games that have not started
+    # are not in it.
     for row in users_picks.values():
         row["potential"] = row["total"] + row["outstanding"]
+        row["pending_total"] = row["total"] + row["live"]
 
     return sorted(
         users_picks.values(),

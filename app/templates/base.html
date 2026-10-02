@@ -13,9 +13,9 @@
     .pick-correct  { background-color: #dcfce7; border-color: #16a34a; }
     .pick-wrong    { background-color: #fee2e2; border-color: #dc2626; }
     .pick-pending  { background-color: #fef9c3; border-color: #ca8a04; }
-    /* In progress, not settled: an outline, lighter than a final result. */
-    .pick-live-ahead  { background-color: #f0fdf4; outline: 2px solid #16a34a; outline-offset: -2px; }
-    .pick-live-behind { background-color: #fef2f2; outline: 2px solid #dc2626; outline-offset: -2px; }
+    /* In progress, not settled: an outline only. The fill waits until the game is final. */
+    .pick-live-ahead  { outline: 2px solid #16a34a; outline-offset: -2px; }
+    .pick-live-behind { outline: 2px solid #dc2626; outline-offset: -2px; }
     .pick-live-chip-ahead  { outline: 2px solid #16a34a; outline-offset: 1px; border-radius: 4px; }
     .pick-live-chip-behind { outline: 2px solid #dc2626; outline-offset: 1px; border-radius: 4px; }
   </style>
