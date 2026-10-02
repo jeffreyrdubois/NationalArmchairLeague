@@ -65,7 +65,7 @@ The dashboard (`/`) is your home base. It shows:
 Each game card displays:
 - **Teams** — away vs. home, with logos
 - **Spread** — see [How Scoring Works](#6-how-scoring-works) for an explanation
-- **Kickoff time** — or live score if the game is in progress (auto-refreshes every 60 seconds)
+- **Kickoff time** — or live score if the game is in progress (auto-refreshes every 30 seconds)
 - **Your pick** — highlighted once you've submitted picks for the week:
   - **Green** = correct pick
   - **Red** = wrong pick
@@ -218,7 +218,7 @@ To hand a game back to the sync, use **Clear score** (which also resets that gam
 #### Sync Scores
 
 **Sync Scores** pulls the feed for the week you are looking at, the same way the background sync does
-every five minutes, and reports what happened right on the page:
+every 30 seconds, and reports what happened right on the page:
 
 - **live from ESPN** — real-time scores, including games in progress
 - **nflverse (finished games only)** — ESPN was unreachable, so scores appear once a game is over

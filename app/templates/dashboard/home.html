@@ -255,7 +255,7 @@
 <!-- Auto-refresh during live games -->
 {% if current_games and current_games|selectattr("is_in_progress")|list %}
 <script>
-  setTimeout(() => window.location.reload(), 60000);
+  setTimeout(() => window.location.reload(), 30000);
 </script>
 {% endif %}
 

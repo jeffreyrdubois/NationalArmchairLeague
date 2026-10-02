@@ -1,7 +1,6 @@
 """
 Background scheduler for automatic data fetching.
-- Every 15 min during game windows: fetch live scores
-- Every hour outside game windows: fetch scores
+- Every 30 seconds: fetch live scores for weeks already underway
 - Tuesday morning: fetch new week schedule + spreads
 - Spread lock enforced 24h before first kickoff
 """
@@ -635,8 +634,10 @@ async def sync_historical_season(season_id: int, season_year: int, total_weeks: 
 
 
 def setup_scheduler():
-    # Score sync: every 5 minutes
-    scheduler.add_job(sync_scores, IntervalTrigger(minutes=5), id="sync_scores", replace_existing=True)
+    # Score sync: every 30 seconds. The dashboard and the all-picks page
+    # reload on the same interval while a game is live, so a faster pull
+    # would not show up any sooner.
+    scheduler.add_job(sync_scores, IntervalTrigger(seconds=30), id="sync_scores", replace_existing=True)
     # Spread sync: every 4 hours
     scheduler.add_job(sync_spreads, IntervalTrigger(hours=4), id="sync_spreads", replace_existing=True)
     # Lock enforcement: every minute
