@@ -21,6 +21,27 @@ def compute_home_covered(home_score: int, away_score: int, spread: float) -> boo
     return margin > -spread
 
 
+def live_covering(pick: Pick | None, game: Game | None) -> bool | None:
+    """Whether this pick is covering on the score as it stands.
+
+    None when there is nothing to say: no pick, no spread, no score yet, or
+    the game has not started. A finished game is left to ``is_correct`` — this
+    is only the in-progress read, and it does not write anything.
+    """
+    if pick is None or game is None or game.is_final or not game.is_underway:
+        return None
+    if game.spread is None or game.home_score is None or game.away_score is None:
+        return None
+    if pick.picked_team == game.home_team:
+        picked_home = True
+    elif pick.picked_team == game.away_team:
+        picked_home = False
+    else:
+        return None
+    home_covered = compute_home_covered(game.home_score, game.away_score, game.spread)
+    return home_covered if picked_home else not home_covered
+
+
 def score_pick(pick: Pick, game: Game) -> None:
     """Update a single pick with correct/incorrect and points earned."""
     if not game.is_final or game.home_covered is None:

@@ -187,20 +187,27 @@
 
         {% for u in users %}
         {% set pick = pick_matrix.get(u.id, {}).get(game.id) %}
+        {% set live = live_covering(pick, game) if u.id == user.id else none %}
         <td class="{% if loop.first %}pm-fz pm-c3 px-1 sm:px-2{% else %}px-2 sm:px-3{% endif %}
                    {% if u.id == user.id %}pm-you{% endif %}
                    py-2 sm:py-3 text-center">
           {% if pick %}
-          <div class="inline-flex flex-col items-center">
+          <div class="inline-flex flex-col items-center rounded px-1
+            {% if live == true %}pick-live-chip-ahead
+            {% elif live == false %}pick-live-chip-behind{% endif %}"
+            {% if live == true %}title="Covering on the current score"
+            {% elif live == false %}title="Not covering on the current score"{% endif %}>
             <span class="text-[11px] sm:text-xs font-semibold
-              {% if pick.is_correct == true %}text-green-700
-              {% elif pick.is_correct == false %}text-red-600
+              {% if pick.is_correct == true or live == true %}text-green-700
+              {% elif pick.is_correct == false or live == false %}text-red-600
               {% else %}text-gray-700{% endif %}">
               {{ pick.picked_team }}
             </span>
             <span class="text-[10px] sm:text-xs rounded px-1 mt-0.5
               {% if pick.is_correct == true %}bg-green-100 text-green-700
               {% elif pick.is_correct == false %}bg-red-100 text-red-600 line-through
+              {% elif live == true %}bg-green-100 text-green-700
+              {% elif live == false %}bg-red-100 text-red-600
               {% else %}bg-gray-100 text-gray-500{% endif %}">
               {{ pick.confidence_points }}
             </span>

@@ -37,9 +37,12 @@
       {% else %}
         {% for game in current_games %}
         {% set my_pick = my_picks.get(game.id) %}
+        {% set live = live_covering(my_pick, game) %}
         <div class="border rounded-lg mb-3 p-3
           {% if my_pick and my_pick.is_correct == true %}pick-correct
           {% elif my_pick and my_pick.is_correct == false %}pick-wrong
+          {% elif live == true %}pick-live-ahead
+          {% elif live == false %}pick-live-behind
           {% elif my_pick %}pick-pending{% endif %}">
           <div class="flex items-center justify-between">
             <!-- Away team -->
@@ -99,6 +102,8 @@
             <span>{{ my_pick.confidence_points }} pts
               {% if my_pick.is_correct == true %} &mdash; Won {{ my_pick.points_earned|int }}!
               {% elif my_pick.is_correct == false %} &mdash; Lost
+              {% elif live == true %} &mdash; Covering
+              {% elif live == false %} &mdash; Not covering
               {% endif %}
             </span>
           </div>

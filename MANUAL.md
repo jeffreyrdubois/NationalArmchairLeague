@@ -67,9 +67,9 @@ Each game card displays:
 - **Spread** — see [How Scoring Works](#6-how-scoring-works) for an explanation
 - **Kickoff time** — or live score if the game is in progress (auto-refreshes every 30 seconds)
 - **Your pick** — highlighted once you've submitted picks for the week:
-  - **Green** = correct pick
-  - **Red** = wrong pick
-  - **Yellow** = game not yet final
+  - **Green** = correct pick, or (outline, while the game is live) covering on the current score
+  - **Red** = wrong pick, or (outline, while the game is live) not covering on the current score
+  - **Yellow** = game not started, or no score yet
 
 ### Sidebar — Standings
 - **This Week** — current week leaderboard
