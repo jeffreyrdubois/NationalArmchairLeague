@@ -2,6 +2,7 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 import os
 
+from app.services.scoring import live_covering
 from app.utils import PAYMENT_METHODS, ordinal, payment_method_label, to_eastern
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -16,6 +17,9 @@ templates.env.filters["ordinal"] = ordinal
 # Zelle / Venmo / Cash App — the choices on Account Settings and League Funds.
 templates.env.globals["payment_methods"] = PAYMENT_METHODS
 templates.env.globals["payment_method_label"] = payment_method_label
+# True/False/None: is the viewer's pick covering on the score right now.
+# Finished games stay on is_correct, so this never restyles a settled result.
+templates.env.globals["live_covering"] = live_covering
 
 # Build identity, shown in the footer of every page. After an Unraid update the
 # first question is whether the new image actually took; putting the answer on
