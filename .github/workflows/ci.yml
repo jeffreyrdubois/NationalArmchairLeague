@@ -64,6 +64,12 @@ jobs:
       - name: Test issue-reporting settings
         run: python tests/test_issue_reporting.py
 
+      # The pre-kickoff webhook is what lets an automation run when picks are
+      # about to lock, instead of on a fixed Thursday. These check the lead
+      # time is a setting, that a week fires once, and that the body is signed.
+      - name: Test picks webhook
+        run: python tests/test_picks_webhook.py
+
       # Scores are where the league's results come from, and the score sync
       # used to overwrite hand-entered finals with whatever the feed said —
       # which blanked them minutes after a contributor saved them and left

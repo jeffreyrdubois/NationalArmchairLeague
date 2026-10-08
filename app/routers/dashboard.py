@@ -6,9 +6,10 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Season, Week, Game, Pick, User, PushSubscription, Transaction, AppSetting, OAuthClient
+from app.models import Season, Week, Game, Pick, User, PushSubscription, Transaction, AppSetting, OAuthClient, Role
 from app.auth import get_current_user, verify_password, hash_password
 from app.services import oauth
+from app.services import picks_webhook
 from app.utils import public_url, short_labels, normalize_payment_method
 from app.services.scoring import get_week_standings, get_season_standings
 from app.services.visibility import (
@@ -338,8 +339,37 @@ def _render_settings(request: Request, db: Session, user: User, **extra):
             # one time it is readable.
             "new_client": extra.get("new_client"),
             "new_secret": extra.get("new_secret"),
+            "webhook": picks_webhook.config(db) if user.role == Role.admin else None,
+            "webhook_status": picks_webhook.status(db) if user.role == Role.admin else None,
+            "webhook_next": picks_webhook.next_delivery(db) if user.role == Role.admin else None,
+            "new_webhook_secret": extra.get("new_webhook_secret"),
         },
     )
+
+
+
+@router.post("/settings/picks-webhook")
+async def save_picks_webhook(
+    request: Request,
+    webhook_url: str = Form(""),
+    webhook_secret: str = Form(""),
+    offset_minutes: int = Form(60),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user or user.role != Role.admin:
+        return RedirectResponse(url="/settings", status_code=303)
+    try:
+        generated = picks_webhook.save_config(db, webhook_url, webhook_secret, offset_minutes)
+    except ValueError as exc:
+        return _render_settings(request, db, user, error=str(exc))
+    if generated:
+        return _render_settings(
+            request, db, user,
+            msg="Webhook saved. Copy the signing secret — it is shown this once.",
+            new_webhook_secret=generated,
+        )
+    return RedirectResponse(url="/settings?msg=Webhook+settings+saved", status_code=303)
 
 
 @router.get("/settings", response_class=HTMLResponse)

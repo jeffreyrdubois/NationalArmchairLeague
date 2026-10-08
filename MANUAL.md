@@ -618,6 +618,51 @@ The AI follows the same rules the site does. Nobody's picks, yours excepted,
 are visible before a week locks. Picks can't be changed once it has. Every
 point value is used once. A submission that breaks any rule saves nothing.
 
+### Picks webhook
+
+Picks lock at the first kickoff, which is not a fixed evening. An admin can
+have NAL call an automation when that lock is a chosen amount of time away,
+instead of hoping a weekly schedule lands in the window.
+
+**Account Settings → AI Access (MCP) → Picks webhook** (admins):
+
+- **Webhook URL** — where to POST. Blank turns it off.
+- **Lead time before first kickoff** — 15 minutes through 24 hours. The
+  default is 1 hour. This is a setting, not a hardcoded hour.
+- **Signing secret** — generated the first time a URL is saved and shown
+  once. Paste a replacement to rotate it; leave the field blank to keep the
+  current one.
+
+When the lead time hits, NAL POSTs once for that week. A failed call is
+retried (three times immediately, then again on the next minute) until
+kickoff. A week that already delivered is not sent again.
+
+The body is compact JSON, keys sorted, and the signature is the HMAC-SHA256
+of those exact bytes:
+
+```json
+{
+  "event": "picks_lock_approaching",
+  "fired_at": "2026-10-08T22:15:00Z",
+  "first_kickoff": "2026-10-08T23:15:00Z",
+  "offset_minutes": 60,
+  "season_year": 2026,
+  "week_label": "Week 5",
+  "week_number": 5
+}
+```
+
+Headers:
+
+| Header | Value |
+|---|---|
+| `Content-Type` | `application/json` |
+| `X-NAL-Event` | `picks_lock_approaching` |
+| `X-NAL-Delivery` | `{season}-W{week}`, the same all week |
+| `X-NAL-Signature` | `sha256=` plus the hex HMAC of the raw body |
+
+Reject a request whose signature does not match. Times are UTC.
+
 ---
 
 ## Quick Reference

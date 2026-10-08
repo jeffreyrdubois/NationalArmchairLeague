@@ -162,6 +162,7 @@ class Week(Base):
     is_picks_locked = Column(Boolean, default=False)
     picks_lock_override = Column(Boolean, default=False)  # admin manually unlocked; skip auto-relock
     picks_reminder_sent = Column(Boolean, default=False)  # push notification sent for this week
+    picks_webhook_sent = Column(Boolean, default=False)  # pre-kickoff webhook delivered for this week
     is_spreads_locked = Column(Boolean, default=False)
     is_completed = Column(Boolean, default=False)
     espn_week = Column(Integer)               # ESPN API week number

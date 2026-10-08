@@ -13,3 +13,5 @@ starlette==0.38.4
 aiosqlite==0.20.0
 pywebpush==2.0.0
 mcp==1.12.4
+# mcp 1.12 still imports eval_type_backport, removed in pydantic 2.13.
+pydantic>=2.11,<2.13
