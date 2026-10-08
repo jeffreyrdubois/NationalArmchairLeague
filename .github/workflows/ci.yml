@@ -83,6 +83,9 @@ jobs:
       - name: Test short player names
         run: python tests/test_short_labels.py
 
+      - name: Test team record formatting
+        run: python tests/test_team_records.py
+
       # The all-picks grid freezes the viewer's own column, which only works if
       # the route orders the players with the viewer first — a plain-looking
       # line that the whole side-by-side comparison rests on.

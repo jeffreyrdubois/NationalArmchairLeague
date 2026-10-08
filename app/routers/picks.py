@@ -191,6 +191,7 @@ async def picks_page(
         "user": user,
         "season": season,
         "current_week": current_week,
+        "team_records": await espn.fetch_team_records(),
     })
     return templates.TemplateResponse("picks/picks.html", ctx)
 
@@ -304,7 +305,8 @@ async def all_picks_for_week(
         for pick in db.query(Pick).filter(Pick.week_id == week_id).all():
             pick_matrix.setdefault(pick.user_id, {})[pick.game_id] = pick
 
-        from app.services.scoring import get_week_standings
+        from app.services import espn
+from app.services.scoring import get_week_standings
         standings = get_week_standings(db, week_id)
 
         # The side of each unfinished game that helps the viewer most — not

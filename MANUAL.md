@@ -81,7 +81,7 @@ Your row is highlighted in yellow. Click any player's name to view their profile
 
 ## 4. Making Picks
 
-Go to **My Picks** in the navigation bar. Picks must be entered before the first game of the week kicks off — after that, picks are locked.
+Go to **My Picks** in the navigation bar. Picks must be entered before the first game of the week kicks off — after that, picks are locked. Each team's overall record sits under its logo and above the spread; the spread stays the larger number.
 
 ### The Confidence Point System
 Every week you assign a unique point value to each game. The number of available points matches the number of games that week (e.g., 16 games = points 1–16).

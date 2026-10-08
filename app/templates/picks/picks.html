@@ -81,7 +81,10 @@
             <img src="{{ game.away_team_logo }}" alt="{{ game.away_team }}"
               class="w-10 h-10 mx-auto mb-1 object-contain" onerror="this.style.display='none'" />
             <div class="font-semibold text-sm">{{ game.away_team_name or game.away_team }}</div>
-            <div class="text-xs text-gray-500 mt-1">
+            {% if team_records.get(game.away_team) %}
+            <div class="text-[10px] leading-tight text-gray-400">{{ team_records.get(game.away_team) }}</div>
+            {% endif %}
+            <div class="text-sm font-semibold text-gray-800 mt-0.5">
               {% if game.spread is not none %}
                 {% if game.spread < 0 %}+{{ "%.1f"|format(-game.spread) }}
                 {% elif game.spread > 0 %}Fav -{{ "%.1f"|format(game.spread) }}
@@ -106,7 +109,10 @@
             <img src="{{ game.home_team_logo }}" alt="{{ game.home_team }}"
               class="w-10 h-10 mx-auto mb-1 object-contain" onerror="this.style.display='none'" />
             <div class="font-semibold text-sm">{{ game.home_team_name or game.home_team }}</div>
-            <div class="text-xs text-gray-500 mt-1">
+            {% if team_records.get(game.home_team) %}
+            <div class="text-[10px] leading-tight text-gray-400">{{ team_records.get(game.home_team) }}</div>
+            {% endif %}
+            <div class="text-sm font-semibold text-gray-800 mt-0.5">
               {% if game.spread is not none %}
                 {% if game.spread < 0 %}Fav -{{ "%.1f"|format(-game.spread) }}
                 {% elif game.spread > 0 %}+{{ "%.1f"|format(game.spread) }}
