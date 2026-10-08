@@ -9,11 +9,13 @@ The body is HMAC-SHA256 signed with the saved secret. A delivery is marked
 sent only after a 2xx, so a failed post is retried on the next scheduler tick
 until kickoff. It never fires twice for the same week.
 """
+import base64
 import hashlib
 import hmac
 import json
 import logging
 import secrets
+import time
 from datetime import datetime, timedelta
 
 import httpx
@@ -138,9 +140,24 @@ def next_delivery(db: Session, now: datetime | None = None) -> dict | None:
     return None
 
 
-def sign(secret: str, body: bytes) -> str:
-    digest = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return f"sha256={digest}"
+def signing_key(secret: str) -> bytes:
+    """Grok secrets are Standard Webhooks keys: whsec_ plus base64.
+
+    A plain secret still works, so a receiver that is not Grok can keep using
+    the value it was given.
+    """
+    raw = secret.removeprefix("whsec_")
+    try:
+        key = base64.b64decode(raw, validate=True)
+    except Exception:
+        key = b""
+    return key or secret.encode()
+
+
+def sign(secret: str, body: bytes, webhook_id: str, timestamp: str) -> str:
+    signed = f"{webhook_id}.{timestamp}.".encode() + body
+    digest = base64.b64encode(hmac.new(signing_key(secret), signed, hashlib.sha256).digest()).decode()
+    return f"v1,{digest}"
 
 
 def build_payload(week: Week, minutes: int, fired_at: datetime) -> dict:
@@ -175,16 +192,26 @@ def due_weeks(db: Session, now: datetime) -> list[Week]:
 
 
 async def post_webhook(url: str, secret: str, body: bytes, delivery_id: str) -> tuple[bool, str]:
-    headers = {
-        "Content-Type": "application/json",
-        "User-Agent": "NationalArmchairLeague-webhook",
-        "X-NAL-Event": EVENT,
-        "X-NAL-Delivery": delivery_id,
-        "X-NAL-Signature": sign(secret, body),
-    }
+    """POST with a Standard Webhooks signature, resigned on every attempt.
+
+    Grok rejects a timestamp more than five minutes old, and only accepts a
+    delivery whose signature covers webhook-id, webhook-timestamp, and the raw
+    body. A 2xx (Grok returns 202) is success.
+    """
     last = "no attempt"
     async with httpx.AsyncClient(timeout=15) as client:
         for attempt in range(1, MAX_ATTEMPTS + 1):
+            webhook_id = f"{delivery_id}-{attempt}-{int(time.time())}"
+            timestamp = str(int(time.time()))
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "NationalArmchairLeague-webhook",
+                "X-NAL-Event": EVENT,
+                "X-NAL-Delivery": delivery_id,
+                "webhook-id": webhook_id,
+                "webhook-timestamp": timestamp,
+                "webhook-signature": sign(secret, body, webhook_id, timestamp),
+            }
             try:
                 resp = await client.post(url, content=body, headers=headers)
             except httpx.HTTPError as exc:
