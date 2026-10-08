@@ -637,8 +637,7 @@ When the lead time hits, NAL POSTs once for that week. A failed call is
 retried (three times immediately, then again on the next minute) until
 kickoff. A week that already delivered is not sent again.
 
-The body is compact JSON, keys sorted, and the signature is the HMAC-SHA256
-of those exact bytes:
+The body is compact JSON, keys sorted. The signature is Standard Webhooks, which is what Grok's automation endpoint checks: HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{raw body}`, base64, sent as `webhook-signature: v1,…`. A secret that starts with `whsec_` is base64-decoded after that prefix; any other secret is used as the raw key.
 
 ```json
 {
@@ -657,11 +656,13 @@ Headers:
 | Header | Value |
 |---|---|
 | `Content-Type` | `application/json` |
+| `webhook-id` | Unique per attempt |
+| `webhook-timestamp` | Unix seconds; resigned on every retry |
+| `webhook-signature` | `v1,` plus the base64 HMAC |
 | `X-NAL-Event` | `picks_lock_approaching` |
 | `X-NAL-Delivery` | `{season}-W{week}`, the same all week |
-| `X-NAL-Signature` | `sha256=` plus the hex HMAC of the raw body |
 
-Reject a request whose signature does not match. Times are UTC.
+Reject a request whose signature does not match. A Grok automation trigger accepts this as-is: paste its endpoint and `whsec_` secret into the settings above. Times in the body are UTC.
 
 ---
 

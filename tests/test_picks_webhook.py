@@ -137,8 +137,9 @@ def test_fires_once_inside_the_chosen_window_and_is_signed():
     assert payload["week_number"] == 5
     assert payload["season_year"] == 2026
     assert payload["first_kickoff"] == "2026-10-11T17:00:00Z"
-    expected = "sha256=" + hmac.new(b"topsecret", body, hashlib.sha256).hexdigest()
-    assert picks_webhook.sign(secret, body) == expected
+    expected = picks_webhook.sign(secret, body, "2026-W5", "1700000000")
+    assert expected.startswith("v1,")
+    assert picks_webhook.sign("whsec_" + __import__("base64").b64encode(b"topsecret").decode(), body, "2026-W5", "1700000000") == expected
     # second tick does not send again
     assert __import__("asyncio").get_event_loop().run_until_complete(
         picks_webhook.fire_due(db, now=kickoff - timedelta(minutes=10), poster=poster)

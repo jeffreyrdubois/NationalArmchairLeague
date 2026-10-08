@@ -301,7 +301,7 @@
             placeholder="{% if webhook.secret_set %}{{ webhook.secret_hint }} — leave blank to keep{% else %}Leave blank to generate one{% endif %}"
             class="w-full border rounded px-2 py-1 text-sm font-mono" />
           <p class="text-xs text-gray-400 mt-1">
-            Each POST is signed <code>X-NAL-Signature: sha256=<hmac of the raw body></code>.
+            Each POST is signed the Standard Webhooks way (<code>webhook-signature: v1,…</code>). Paste the Grok endpoint and its <code>whsec_</code> secret here.
             Verify that before trusting the call.
           </p>
         </div>
