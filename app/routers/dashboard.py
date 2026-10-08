@@ -12,6 +12,7 @@ from app.services import oauth
 from app.services import picks_webhook
 from app.utils import public_url, short_labels, normalize_payment_method
 from app.services.scoring import get_week_standings, get_season_standings
+from app.services.payouts import compute_payouts, load_plan
 from app.services.visibility import (
     can_see_picks,
     get_submission_status,
@@ -173,6 +174,12 @@ async def standings_page(
 
     all_seasons = db.query(Season).order_by(Season.year.desc()).all()
     season_standings = get_season_standings(db, season.id)
+    # Prize money locked in so far, from the same plan the funds page uses.
+    # Season and award prizes stay projected until the season is over, so they
+    # are not in this figure. Players asked to see what everyone has earned.
+    earned = compute_payouts(db, season, load_plan(db, season.id)).earned_by_user()
+    for row in season_standings:
+        row["earned"] = earned.get(row["user"].id, 0.0)
     # Labels for the tight spots (week chips, who's-in chips). A shared first
     # name picks up a last initial so the two Stephens are not both "Stephen".
     # Built from the whole active roster, not just whoever appears in one

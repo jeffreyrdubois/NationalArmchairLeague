@@ -16,7 +16,8 @@
 
 <!-- Season leaderboard -->
 <div class="bg-white rounded-xl shadow p-5 mb-8">
-  <h2 class="font-semibold text-lg mb-4">Season Leaderboard</h2>
+  <h2 class="font-semibold text-lg mb-1">Season Leaderboard</h2>
+  <p class="text-xs text-gray-400 mb-4">Earned is prize money locked in so far. Season and award prizes stay off this column until the season is over.</p>
   <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <thead>
@@ -24,6 +25,7 @@
           <th class="text-left pb-3 pr-6">#</th>
           <th class="text-left pb-3 pr-6">Player</th>
           <th class="text-right pb-3 pr-6">Total Pts</th>
+          <th class="text-right pb-3 pr-6">Earned</th>
           <th class="text-right pb-3 pr-6">Correct</th>
           <th class="text-right pb-3 pr-6">Wrong</th>
           <th class="text-right pb-3">Win %</th>
@@ -44,6 +46,7 @@
             </a>
           </td>
           <td class="py-3 pr-6 text-right font-bold text-lg">{{ row.total|int }}</td>
+          <td class="py-3 pr-6 text-right font-medium text-green-700">${{ "%.2f"|format(row.earned or 0) }}</td>
           <td class="py-3 pr-6 text-right text-green-600">{{ row.correct }}</td>
           <td class="py-3 pr-6 text-right text-red-500">{{ row.wrong }}</td>
           <td class="py-3 text-right text-gray-600">
