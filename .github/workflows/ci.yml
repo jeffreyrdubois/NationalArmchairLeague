@@ -121,5 +121,8 @@ jobs:
       # lock. These speak real MCP to /mcp and check that, that a token a
       # member approved is the only way in (whoever registered the app), and
       # that picks entered through it obey the pick sheet.
+      - name: Test earned money on the standings page
+        run: python tests/test_standings_earned.py
+
       - name: Test the MCP server
         run: python tests/test_mcp.py
