@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models import Season, Week, Game, Pick, User, AuditLog
 from app.auth import get_current_user, require_user
 from app.services.visibility import get_submission_status, picks_are_revealed
+from app.services import espn
 from app.utils import short_labels
 
 router = APIRouter()
@@ -191,6 +192,7 @@ async def picks_page(
         "user": user,
         "season": season,
         "current_week": current_week,
+        "team_records": await espn.fetch_team_records(),
     })
     return templates.TemplateResponse("picks/picks.html", ctx)
 

@@ -370,3 +370,47 @@ async def fetch_current_week_info() -> dict:
         "week": week_obj.get("number"),
         "season_type": season.get("type"),
     }
+
+
+_RECORDS_URL = "https://site.api.espn.com/apis/v2/sports/football/nfl/standings"
+_records_cache: dict = {"at": None, "records": {}}
+
+
+def format_record(wins: str, losses: str, ties: str | None) -> str:
+    record = f"{wins}-{losses}"
+    if ties and ties not in ("0", "0.0"):
+        record += f"-{ties}"
+    return record
+
+
+async def fetch_team_records() -> dict[str, str]:
+    """Overall W-L (and ties) by abbreviation, cached for half an hour.
+
+    The picks page only needs a glance at the standings. A miss leaves the
+    cards without a record rather than failing the page.
+    """
+    now = datetime.utcnow()
+    cached_at = _records_cache["at"]
+    if cached_at and now - cached_at < timedelta(minutes=30) and _records_cache["records"]:
+        return _records_cache["records"]
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(_RECORDS_URL)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as exc:
+        logger.warning("NFL standings fetch failed: %s", exc)
+        return _records_cache["records"]
+    records = {}
+    for conference in data.get("children") or []:
+        entries = (conference.get("standings") or {}).get("entries") or []
+        for entry in entries:
+            abbr = (entry.get("team") or {}).get("abbreviation")
+            stats = {s.get("name"): s.get("displayValue") for s in entry.get("stats") or []}
+            wins, losses = stats.get("wins"), stats.get("losses")
+            if abbr and wins is not None and losses is not None:
+                records[abbr] = format_record(wins, losses, stats.get("ties"))
+    if records:
+        _records_cache["at"] = now
+        _records_cache["records"] = records
+    return records
