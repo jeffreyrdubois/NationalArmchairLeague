@@ -633,6 +633,21 @@ async def sync_historical_season(season_id: int, season_year: int, total_weeks: 
     )
 
 
+
+async def fire_picks_webhook():
+    """POST the configured webhook once the week's lead time before kickoff arrives."""
+    from app.services.picks_webhook import fire_due
+
+    db = SessionLocal()
+    try:
+        await fire_due(db)
+    except Exception as e:
+        logger.error(f"Picks webhook error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
 def setup_scheduler():
     # Score sync: every 30 seconds. The dashboard and the all-picks page
     # reload on the same interval while a game is live, so a faster pull
@@ -644,5 +659,8 @@ def setup_scheduler():
     scheduler.add_job(enforce_locks, IntervalTrigger(minutes=1), id="enforce_locks", replace_existing=True)
     # Picks reminder push: every 5 minutes (low cost; only fires once per week)
     scheduler.add_job(send_picks_reminders, IntervalTrigger(minutes=5), id="picks_reminders", replace_existing=True)
+    # Pre-kickoff webhook: every minute, so a short lead time is not missed.
+    # Fires at most once per week, and only when a URL is saved.
+    scheduler.add_job(fire_picks_webhook, IntervalTrigger(minutes=1), id="picks_webhook", replace_existing=True)
     scheduler.start()
     logger.info("Scheduler started")

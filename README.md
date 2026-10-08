@@ -52,3 +52,12 @@ published by CI.
 Everything the league owns — the SQLite database and the session signing key —
 lives in the single `/app/data` volume, so one backup of that folder is a
 complete backup.
+
+## Picks webhook
+
+Admins set this under **Account Settings → AI Access (MCP) → Picks webhook**:
+a URL, a signing secret, and how long before the week's first kickoff to
+call it (default one hour, selectable). NAL POSTs once per week when that
+lead time arrives, retries on failure, and signs the body
+(`X-NAL-Signature: sha256=…`). Payload and verification are in
+[MANUAL.md](MANUAL.md#picks-webhook).

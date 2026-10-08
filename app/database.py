@@ -40,6 +40,8 @@ def _migrate():
             conn.execute(text("ALTER TABLE weeks ADD COLUMN picks_lock_override BOOLEAN DEFAULT 0"))
         if "picks_reminder_sent" not in week_cols:
             conn.execute(text("ALTER TABLE weeks ADD COLUMN picks_reminder_sent BOOLEAN DEFAULT 0"))
+        if "picks_webhook_sent" not in week_cols:
+            conn.execute(text("ALTER TABLE weeks ADD COLUMN picks_webhook_sent BOOLEAN DEFAULT 0"))
 
         # --- users table ---
         user_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(users)")).fetchall()}
