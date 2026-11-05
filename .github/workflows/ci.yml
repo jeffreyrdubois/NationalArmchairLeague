@@ -50,6 +50,14 @@ jobs:
       - name: Test editing submitted picks
         run: python tests/test_pick_editing.py
 
+      # Each confidence value is used once. A value already sitting on one
+      # game has to be gone from the other games' menus — both on the page
+      # as first rendered, and again as soon as a player picks a new one.
+      - name: Test confidence point menus
+        run: |
+          python tests/test_pick_points_dropdown.py
+          node tests/test_pick_points.js
+
       # Pick secrecy is the rule the whole pool rests on: anyone who can read
       # another player's picks before the lock can just copy the field. It is
       # also the easiest thing to break by accident from a template, so these
