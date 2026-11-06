@@ -123,18 +123,20 @@
         </label>
       </div>
 
-      <!-- Points selector -->
+      <!-- Points selector. A value already chosen on another game is omitted
+           so the open menu only offers what is still free. This game keeps its own. -->
       <div>
         <label class="text-xs font-medium text-gray-600 mb-1 block">Confidence Points</label>
+        {% set own_points = my_pick.confidence_points if my_pick else none %}
         <select name="game_{{ game.id }}_points"
           {% if week.is_picks_locked %}disabled{% endif %}
           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
           onchange="updateLegend()">
-          <option value="">-- Select points --</option>
+          <option value="" {% if own_points is none %}selected{% endif %}>-- Select points --</option>
           {% for pt in available_points %}
-          <option value="{{ pt }}" {% if my_pick and my_pick.confidence_points == pt %}selected{% endif %}>
-            {{ pt }} point{% if pt != 1 %}s{% endif %}
-          </option>
+          {% if own_points == pt or pt not in used_points %}
+          <option value="{{ pt }}" {% if own_points == pt %}selected{% endif %}>{{ pt }} point{% if pt != 1 %}s{% endif %}</option>
+          {% endif %}
           {% endfor %}
         </select>
       </div>
@@ -155,8 +157,15 @@
   </form>
 </div>
 
+<script src="/static/js/pick-points.js"></script>
 <script>
+const ALL_POINTS = {{ available_points | tojson }};
+
 function updateLegend() {
+  syncPointMenus(
+    document.querySelectorAll('#picks-form select[name$="_points"]'),
+    ALL_POINTS
+  );
   const form = document.getElementById('picks-form');
   const pointCounts = {};
 
