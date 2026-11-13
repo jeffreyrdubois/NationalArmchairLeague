@@ -5,7 +5,7 @@
 2. [Roles & Permissions](#2-roles--permissions)
 3. [Dashboard](#3-dashboard)
 4. [Making Picks](#4-making-picks)
-5. [Standings & Profiles](#5-standings--profiles)
+5. [Standings, Profiles & Simulator](#5-standings--profiles)
 6. [How Scoring Works](#6-how-scoring-works)
 7. [Contributor Guide — Spreads & Scores](#7-contributor-guide--spreads--scores)
 8. [Admin Guide — Managing the League](#8-admin-guide--managing-the-league)
@@ -151,6 +151,21 @@ The full season leaderboard, then each week's results newest first. Weeks that h
 
 ### Player Profiles (`/profile/{id}`)
 Click any player's name in the standings or dashboard to see their pick history for any season.
+
+### Simulator (`/simulator`)
+After a week's picks are revealed, the Simulator lets you flip each remaining
+game to "covers" or "does not cover" and see how that slate would finish the
+week for everyone. Finished games stay on their real results; nothing is saved.
+
+It opens with every unfinished game set so **you** win the rest — your pick
+covers on each one. Switch any game to the other side when you want to see a
+loss, especially when a rival put more confidence points on your team than you
+did. Use **Reset to my wins** to put the slate back.
+
+The grid shows every player with **your column first** (frozen while you scroll).
+The totals row highlights 1st, 2nd and 3rd under the current assumptions, and a
+projected finish list underneath mirrors that podium. Pick a different revealed
+week from the buttons at the top when you want to replay an earlier slate.
 
 ---
 
@@ -674,6 +689,7 @@ Reject a request whose signature does not match. A Grok automation trigger accep
 | My Picks | `/picks` | All |
 | All Picks (after lock) / Pick Status (before) | `/picks/week/{id}/all` | All |
 | Standings | `/standings` | All |
+| Simulator | `/simulator` | All (after picks lock) |
 | Submit an Issue | `/feedback` | All |
 | Account Settings (incl. AI access) | `/settings` | All |
 | Spreads | `/admin/spreads` | Contributor+ |
