@@ -296,10 +296,40 @@ def test_nav_link_present_via_template_compile():
     assert b"Remaining games" in r.content or b"every game this week is final" in r.content
 
 
+def test_script_terminator_in_a_name_stays_inside_json():
+    """A stored ``</script>`` must not end #sim-data. The name stays data."""
+    ids = build_league()
+    payload = "</script><script>alert(1)</script>"
+    db = SessionLocal()
+    mira = db.query(User).filter(User.id == ids["mira"]).one()
+    mira.first_name = payload
+    mira.last_name = "O'Brien"
+    db.commit()
+    db.close()
+
+    html = client_for(ids["alice"]).get(f"/simulator?week_id={ids['week']}").text
+    assert "</script><script>" not in html
+    assert "<script>alert" not in html
+
+    body = re.search(
+        r'<script id="sim-data" type="application/json">(.*?)</script>',
+        html,
+        re.S,
+    ).group(1)
+    assert "<" not in body
+    data = json.loads(body)
+    labels = [u["label"] for u in data["users"]]
+    assert payload in labels
+    # The visible name is escaped text, including the apostrophe.
+    assert "&lt;/script&gt;" in html
+    assert "O&#39;Brien" in html
+
+
 if __name__ == "__main__":
     test_default_assumptions_are_viewer_wins()
     test_simulate_week_awards_defaults_and_respects_finals()
     test_page_puts_viewer_first_and_defaults_to_their_wins()
     test_simulator_hidden_before_lock()
     test_nav_link_present_via_template_compile()
+    test_script_terminator_in_a_name_stays_inside_json()
     print("ok")

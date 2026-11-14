@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User, Role, Invite, normalize_invite_code
 from app.auth import hash_password, verify_password, create_access_token, get_current_user
+from app.utils import clean_person_name
 import os
 
 router = APIRouter()
@@ -185,9 +186,15 @@ async def register(
         return render_error("Email already registered")
 
     try:
+        stored_first = clean_person_name(first_name, "First name")
+        stored_last = clean_person_name(last_name, "Last name")
+    except ValueError as exc:
+        return render_error(str(exc))
+
+    try:
         user = User(
-            first_name=first_name.strip(),
-            last_name=last_name.strip(),
+            first_name=stored_first,
+            last_name=stored_last,
             email=email,
             password_hash=hash_password(password),
             role=Role.admin if bootstrap else Role.player,

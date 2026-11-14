@@ -287,7 +287,9 @@
   </ol>
 </div>
 
-<script id="sim-data" type="application/json">{{ sim_payload | safe }}</script>
+{# tojson escapes < > & and quotes. |safe JSON does not, so a name
+   containing </script> would end this element and run as script. #}
+<script id="sim-data" type="application/json">{{ sim_payload | tojson }}</script>
 <script src="/static/js/simulator.js"></script>
 
 {% endif %}
