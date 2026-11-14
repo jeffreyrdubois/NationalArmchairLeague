@@ -211,9 +211,11 @@
               </details>
 
               {% if u.id != user.id %}
-              <!-- Delete (permanent) -->
-              <form method="post" action="/admin/users/{{ u.id }}/delete" class="inline"
-                onsubmit="return confirm('Permanently delete {{ u.first_name }} {{ u.last_name }}? This removes the user and all of their picks and cannot be undone.');">
+              <!-- Delete (permanent). The name is a data attribute, not part of
+                   an onsubmit script: the HTML parser decodes &#39; before
+                   JavaScript runs, so a quote in the name would break out. -->
+              <form method="post" action="/admin/users/{{ u.id }}/delete" class="inline js-delete-user"
+                data-user-name="{{ u.first_name }} {{ u.last_name }}">
                 <button class="text-xs px-2 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">
                   Delete
                 </button>
@@ -530,6 +532,20 @@
 {% endblock %}
 {% block extra_scripts %}
 <script>
+  // Read the name as text. Never build the confirm() call by concatenating
+  // it into a script string.
+  document.querySelectorAll('form.js-delete-user').forEach(function (form) {
+    form.addEventListener('submit', function (event) {
+      var slot = document.createElement('span');
+      slot.textContent = form.getAttribute('data-user-name') || 'this user';
+      var name = slot.textContent;
+      var ok = window.confirm(
+        'Permanently delete ' + name +
+        '? This removes the user and all of their picks and cannot be undone.'
+      );
+      if (!ok) event.preventDefault();
+    });
+  });
   function copyInvite(code, btn) {
     const link = window.location.origin + '/register?code=' + code;
     const done = () => {

@@ -21,7 +21,13 @@ from app.services import espn, github_issues, payouts
 from app.services import docker_api, registry, selfupdate
 from app.services.awards import AWARD_REGISTRY
 from app.services.scoring import unscore_game, update_game_results
-from app.utils import eastern_to_utc, normalize_payment_method, payment_method_label, to_eastern
+from app.utils import (
+    clean_person_name,
+    eastern_to_utc,
+    normalize_payment_method,
+    payment_method_label,
+    to_eastern,
+)
 
 router = APIRouter(prefix="/admin")
 
@@ -958,9 +964,19 @@ async def add_user(
     if db.query(User).filter(User.email == email).first():
         return RedirectResponse(url="/admin/?error=Email+already+registered", status_code=303)
 
+    try:
+        stored_first = clean_person_name(first_name, "First name")
+        stored_last = clean_person_name(last_name, "Last name")
+    except ValueError as exc:
+        from urllib.parse import quote
+        return RedirectResponse(
+            url="/admin/?error=" + quote(str(exc)),
+            status_code=303,
+        )
+
     new_user = User(
-        first_name=first_name.strip(),
-        last_name=last_name.strip(),
+        first_name=stored_first,
+        last_name=stored_last,
         email=email,
         password_hash=hash_password(password),
         role=Role.player,
