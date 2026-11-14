@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+{% block title %}Simulator{% if week %} &mdash; {{ week.label or ('Week ' + week.week_number|string) }}{% endif %}{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* Same frozen-column idea as the all-picks matrix: game + viewer's column
+     stay put while other players scroll sideways. */
+  .sim-wrap { overflow: auto; max-height: min(78vh, 900px); -webkit-overflow-scrolling: touch; }
+  .sim-table { border-collapse: separate; border-spacing: 0; }
+
+  .sim-table th,
+  .sim-table td { background-color: #fff; }
+  .sim-table tbody td { border-bottom: 1px solid #e5e7eb; }
+
+  .sim-table thead th {
+    position: sticky; top: 0; z-index: 20;
+    background-color: #f9fafb;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .sim-table tfoot td {
+    position: sticky; bottom: 0; z-index: 20;
+    background-color: #f9fafb;
+    border-top: 2px solid #e5e7eb;
+  }
+
+  .sim-fz { position: sticky; z-index: 10; overflow: hidden; }
+  .sim-table thead .sim-fz,
+  .sim-table tfoot .sim-fz { z-index: 30; }
+
+  .sim-c1 { left: 0;     min-width: 100px; max-width: 100px; width: 100px; }
+  .sim-c2 { left: 100px; min-width: 50px;  max-width: 50px;  width: 50px;
+            box-shadow: 3px 0 5px -3px rgba(0, 0, 0, .35); }
+
+  @media (min-width: 640px) {
+    .sim-c1 { left: 0;     min-width: 240px; max-width: 240px; width: 240px; }
+    .sim-c2 { left: 240px; min-width: 84px;  max-width: 84px;  width: 84px; }
+  }
+
+  .sim-table tbody .sim-you { background-color: #fefce8; }
+  .sim-table thead .sim-you,
+  .sim-table tfoot .sim-you { background-color: #fef9c3; }
+
+  .sim-table tbody tr:hover td { background-color: #f9fafb; }
+  .sim-table tbody tr:hover .sim-you { background-color: #fef9c3; }
+
+  /* Podium tint on the totals row — gold / silver / bronze, kept distinct
+     from each other and from the viewer's default yellow column tint. */
+  .sim-table tfoot td.sim-place-1 { background-color: #fde047; }
+  .sim-table tfoot td.sim-place-2 { background-color: #e5e7eb; }
+  .sim-table tfoot td.sim-place-3 { background-color: #fdba74; }
+  .sim-table tfoot td.sim-you.sim-place-1 { background-color: #facc15; }
+  .sim-table tfoot td.sim-you.sim-place-2 { background-color: #d1d5db; }
+  .sim-table tfoot td.sim-you.sim-place-3 { background-color: #fb923c; }
+
+  .sim-toggle button.sim-on {
+    background-color: #111827;
+    color: #fff;
+    border-color: #111827;
+  }
+  .sim-toggle button.sim-off {
+    background-color: #fff;
+    color: #4b5563;
+    border-color: #d1d5db;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
+  <h1 class="text-2xl font-bold">Simulator</h1>
+  {% if weeks %}
+  <div class="flex flex-wrap gap-2">
+    {% for w in weeks %}
+    <a href="/simulator?week_id={{ w.id }}"
+       class="px-3 py-1 rounded text-sm
+         {% if week and w.id == week.id %}bg-yellow-400 text-gray-900 font-bold
+         {% else %}bg-white border text-gray-600 hover:bg-gray-50{% endif %}">
+      {{ w.label or ('Week ' + w.week_number|string) }}
+      {% if unfinished_by_week.get(w.id) %}
+      <span class="text-[10px] text-green-700 font-semibold">live</span>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+{% if not week %}
+<p class="text-sm text-gray-500">
+  No weeks with revealed picks yet. The Simulator opens once the first game of
+  a week kicks off and everyone&rsquo;s picks are visible.
+</p>
+
+{% else %}
+
+<p class="text-sm text-gray-500 mb-6">
+  Flip the remaining games to see how the week would finish.
+  It starts with every unfinished game set so <strong>you</strong> win —
+  then switch any of them to a loss when a rival has more points on your side.
+</p>
+
+{% if remaining %}
+<div class="bg-white rounded-xl shadow p-5 mb-6" id="sim-controls">
+  <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+    <h2 class="font-semibold text-lg">Remaining games</h2>
+    <button type="button" id="sim-reset"
+            class="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50">
+      Reset to my wins
+    </button>
+  </div>
+  <ul class="space-y-3">
+    {% for game in remaining %}
+    {% set hc = assumptions.get(game.id) %}
+    <li class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 py-2 border-b border-gray-100 last:border-0"
+        data-game-id="{{ game.id }}">
+      <div class="sm:w-56 shrink-0">
+        <div class="text-sm font-medium">
+          {{ game.away_team }} @ {{ game.home_team }}
+        </div>
+        <div class="text-xs text-gray-400">
+          {% if game.spread is none %}Spread TBD
+          {% elif game.spread == 0 %}Pick&rsquo;em
+          {% else %}{{ game.home_team if game.spread < 0 else game.away_team }} -{{ "%g"|format(game.spread|abs) }}
+          {% endif %}
+          {% if game.is_underway %}
+          <span class="live-pulse text-green-600 font-medium ml-1">LIVE</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="sim-toggle flex gap-2" role="group" aria-label="Who covers {{ game.away_team }} at {{ game.home_team }}">
+        <button type="button"
+                data-home-covered="false"
+                class="text-sm px-3 py-1.5 rounded border font-semibold
+                       {% if hc == false %}sim-on{% else %}sim-off{% endif %}">
+          {{ game.away_team }} covers
+        </button>
+        <button type="button"
+                data-home-covered="true"
+                class="text-sm px-3 py-1.5 rounded border font-semibold
+                       {% if hc == true %}sim-on{% else %}sim-off{% endif %}">
+          {{ game.home_team }} covers
+        </button>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% else %}
+<div class="bg-white rounded-xl shadow p-5 mb-6">
+  <p class="text-sm text-gray-600">
+    Every game this week is final — nothing left to flip. The grid below shows
+    the actual results.
+  </p>
+</div>
+{% endif %}
+
+<p class="text-xs text-gray-500 mb-2">
+  Scroll sideways to compare &mdash; the game and your column stay put.
+  The totals row highlights 1st, 2nd and 3rd under the current assumptions.
+</p>
+
+<div class="bg-white rounded-xl shadow sim-wrap mb-6">
+  <table class="text-sm w-full sim-table" id="sim-matrix">
+    <thead>
+      <tr>
+        <th class="sim-fz sim-c1 text-left px-2 sm:px-4 py-2 sm:py-3 font-medium text-gray-600 text-xs sm:text-sm">
+          Game
+        </th>
+        {% for u in users %}
+        <th class="{% if loop.first %}sim-fz sim-c2 px-1 sm:px-2{% else %}px-2 sm:px-3{% endif %}
+                   {% if u.id == user.id %}sim-you{% endif %}
+                   text-center py-2 sm:py-3 font-medium text-gray-600 text-[10px] sm:text-sm whitespace-nowrap"
+            data-user-id="{{ u.id }}">
+          <a href="/profile/{{ u.id }}" class="hover:underline">
+            {% if u.id == user.id %}You{% else %}{{ player_labels.get(u.id, u.first_name) }}{% endif %}
+          </a>
+        </th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for game in games %}
+      <tr data-game-id="{{ game.id }}" data-final="{{ '1' if game.is_final else '0' }}">
+        <td class="sim-fz sim-c1 px-2 sm:px-4 py-2 sm:py-3 whitespace-nowrap">
+          <div class="flex items-center gap-1 sm:gap-2">
+            <img src="{{ game.away_team_logo }}" class="hidden sm:block w-6 h-6 object-contain shrink-0" onerror="this.style.display='none'" />
+            <span class="text-gray-500 text-[11px] sm:text-sm">{{ game.away_team }}</span>
+            <span class="text-gray-400 text-[11px] sm:text-sm">@</span>
+            <span class="font-medium text-[11px] sm:text-sm">{{ game.home_team }}</span>
+            <img src="{{ game.home_team_logo }}" class="hidden sm:block w-6 h-6 object-contain shrink-0" onerror="this.style.display='none'" />
+          </div>
+          <div class="text-[10px] sm:text-xs text-gray-400 mt-0.5 sm:pl-8">
+            {% if game.is_final %}
+              {{ game.away_score }}-{{ game.home_score }}
+              <span class="{% if game.home_covered %}text-green-600{% else %}text-blue-600{% endif %}">
+                {{ game.home_team if game.home_covered else game.away_team }} covered
+              </span>
+            {% else %}
+              <span class="sim-assumed-label" data-game-id="{{ game.id }}">
+                assume {{ assumed_cover.get(game.id, '—') }}
+              </span>
+            {% endif %}
+          </div>
+        </td>
+        {% for u in users %}
+        {% set pick = pick_matrix.get(u.id, {}).get(game.id) %}
+        {% set srow = standings|selectattr("user.id", "equalto", u.id)|first %}
+        {% set earned = srow.per_game.get(game.id, 0) if srow else 0 %}
+        <td class="{% if loop.first %}sim-fz sim-c2 px-1 sm:px-2{% else %}px-2 sm:px-3{% endif %}
+                   {% if u.id == user.id %}sim-you{% endif %}
+                   py-2 sm:py-3 text-center"
+            data-user-id="{{ u.id }}"
+            data-game-id="{{ game.id }}">
+          {% if pick %}
+          <div class="inline-flex flex-col items-center">
+            <span class="sim-pick-team text-[11px] sm:text-xs font-semibold
+              {% if earned > 0 %}text-green-700{% else %}text-red-600{% endif %}">
+              {{ pick.picked_team }}
+            </span>
+            <span class="sim-pick-pts text-[10px] sm:text-xs rounded px-1 mt-0.5
+              {% if earned > 0 %}bg-green-100 text-green-700
+              {% else %}bg-red-100 text-red-600 line-through{% endif %}">
+              {{ pick.confidence_points }}
+            </span>
+          </div>
+          {% else %}
+          <span class="text-gray-300 text-xs">—</span>
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr id="sim-totals">
+        <td class="sim-fz sim-c1 px-2 sm:px-4 py-2 sm:py-3 font-semibold text-xs sm:text-sm">
+          Simulated total
+        </td>
+        {% for u in users %}
+        {% set srow = standings|selectattr("user.id", "equalto", u.id)|first %}
+        {% set place = podium.get(u.id) %}
+        <td class="{% if loop.first %}sim-fz sim-c2 px-1 sm:px-2{% else %}px-2 sm:px-3{% endif %}
+                   {% if u.id == user.id %}sim-you{% endif %}
+                   {% if place == 1 %}sim-place-1{% elif place == 2 %}sim-place-2{% elif place == 3 %}sim-place-3{% endif %}
+                   py-2 sm:py-3 text-center font-bold text-xs sm:text-sm leading-tight"
+            data-user-id="{{ u.id }}"
+            data-place="{{ place or '' }}">
+          <div class="sim-total">{{ srow.total|int if srow else 0 }}</div>
+          <div class="sim-medal font-normal text-[10px] sm:text-xs text-gray-600">
+            {% if place == 1 %}🥇 1st
+            {% elif place == 2 %}🥈 2nd
+            {% elif place == 3 %}🥉 3rd
+            {% else %}&nbsp;{% endif %}
+          </div>
+        </td>
+        {% endfor %}
+      </tr>
+    </tfoot>
+  </table>
+</div>
+
+<!-- Compact podium list for quick reading -->
+<div class="bg-white rounded-xl shadow p-5" id="sim-podium">
+  <h2 class="font-semibold text-lg mb-3">Projected week finish</h2>
+  <ol class="space-y-2">
+    {% for i, row in standings|enumerate %}
+    {% set place = podium.get(row.user.id) %}
+    <li class="flex items-center justify-between py-1.5 border-b border-gray-100 last:border-0
+               {% if row.user.id == user.id %}bg-yellow-50 -mx-2 px-2 rounded{% endif %}"
+        data-user-id="{{ row.user.id }}">
+      <div class="flex items-center gap-2">
+        <span class="sim-list-rank w-10 text-center text-sm">
+          {% if place == 1 %}🥇
+          {% elif place == 2 %}🥈
+          {% elif place == 3 %}🥉
+          {% else %}<span class="text-gray-400">{{ i + 1 }}</span>{% endif %}
+        </span>
+        <span class="text-sm font-medium">
+          {% if row.user.id == user.id %}You
+          {% else %}{{ row.user.first_name }} {{ row.user.last_name }}{% endif %}
+        </span>
+      </div>
+      <span class="sim-list-total font-bold text-sm">{{ row.total|int }}</span>
+    </li>
+    {% endfor %}
+  </ol>
+</div>
+
+<script id="sim-data" type="application/json">{{ sim_payload | safe }}</script>
+<script src="/static/js/simulator.js"></script>
+
+{% endif %}
+{% endblock %}

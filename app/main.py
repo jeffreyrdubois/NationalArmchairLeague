@@ -9,7 +9,7 @@ import os
 
 from app.database import init_db
 from app.mcp_server import create_endpoint as create_mcp_endpoint, mcp
-from app.routers import auth, picks, dashboard, admin, awards
+from app.routers import auth, picks, dashboard, admin, awards, simulator
 from app.routers import push, feedback, oauth
 from app.services.scheduler import setup_scheduler, scheduler
 from app.services.notifications import init_vapid_keys
@@ -40,6 +40,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.include_router(auth.router)
 app.include_router(picks.router)
 app.include_router(dashboard.router)
+app.include_router(simulator.router)
 app.include_router(admin.router)
 app.include_router(awards.router)
 app.include_router(push.router)

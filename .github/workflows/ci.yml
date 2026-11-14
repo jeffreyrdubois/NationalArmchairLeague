@@ -100,6 +100,12 @@ jobs:
       - name: Test the all-picks grid layout
         run: python tests/test_pick_matrix_layout.py
 
+      # The Simulator defaults every remaining game to the viewer's win and
+      # must never show picks before the lock. These check the scoring helper,
+      # the frozen "You" column, and the pre-lock gate.
+      - name: Test the week Simulator
+        run: python tests/test_simulator.py
+
       # Prize money leaves by Zelle, Venmo, or Cash App. The preference is the
       # player's to set and the commissioner's to see — and to fill in — next
       # to whoever the league still owes.
