@@ -1,8 +1,6 @@
 """What-if week standings — flip remaining covers and see the podium."""
 from __future__ import annotations
 
-import json
-
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -105,7 +103,7 @@ async def simulator(
                 "podium": {},
                 "remaining": [],
                 "player_labels": {},
-                "sim_payload": "null",
+                "sim_payload": None,
             },
         )
 
@@ -202,6 +200,9 @@ async def simulator(
             "remaining": remaining,
             "unfinished_by_week": unfinished_by_week,
             "player_labels": labels,
-            "sim_payload": json.dumps(sim_payload),
+            # The template runs this through |tojson, which is safe inside
+            # <script>. Pre-encoding here and marking it |safe is not: a
+            # name containing </script> would end the element.
+            "sim_payload": sim_payload,
         },
     )

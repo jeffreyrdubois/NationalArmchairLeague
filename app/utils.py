@@ -1,4 +1,5 @@
 """Small shared helpers."""
+import re
 from datetime import datetime, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -75,6 +76,25 @@ def normalize_payment_method(value: str | None) -> str | None:
     if key not in _PAYMENT_METHOD_LABELS:
         raise ValueError("Pick Zelle, Venmo, or Cash App.")
     return key
+
+
+# Angle brackets are how a stored name closed the Simulator <script> element.
+# Quotes stay allowed: O'Brien is a real name, and pages no longer splice
+# names into inline JavaScript.
+_NAME_MARKUP = re.compile(r"[<>]")
+
+
+def clean_person_name(value: str, which: str) -> str:
+    """Strip a first or last name and refuse angle brackets.
+
+    Names are saved at registration and shown to every member. A ``<`` in
+    that text is not a name — it is the start of a tag — so the write is
+    rejected instead of stored for the next page to escape.
+    """
+    name = (value or "").strip()
+    if _NAME_MARKUP.search(name):
+        raise ValueError(f"{which} can't include < or >.")
+    return name
 
 
 def _as_user(person):
