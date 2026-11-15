@@ -61,3 +61,12 @@ call it (default one hour, selectable). NAL POSTs once per week when that
 lead time arrives, retries on failure, and signs the body
 (`X-NAL-Signature: sha256=…`). Payload and verification are in
 [MANUAL.md](MANUAL.md#picks-webhook).
+
+## Issue automations
+
+Opened, reopened, and commented issues are forwarded to a Cursor automation
+(same pattern as `sr2-code`). See [ISSUE_RUN.md](ISSUE_RUN.md) and
+[AGENTS.md](AGENTS.md). Repository secrets required:
+
+- `CURSOR_WEBHOOK_URL`
+- `CURSOR_AUTOMATION_KEY`
