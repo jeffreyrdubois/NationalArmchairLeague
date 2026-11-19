@@ -192,6 +192,12 @@ def complete_week_if_done(db: Session, week: Week) -> bool:
 SCORE_SYNC_STATUS_KEY = "score_sync_status"
 
 
+def _is_sqlite_cantopen(exc: BaseException) -> bool:
+    """True when SQLite refused to open the db or its journal file."""
+    text = str(exc).lower()
+    return "unable to open database file" in text or "disk i/o error" in text
+
+
 def record_score_sync_status(db: Session, status: dict) -> None:
     """Store what the last score sync did, so the scores page can show it.
 
@@ -199,13 +205,39 @@ def record_score_sync_status(db: Session, status: dict) -> None:
     feed has no rows for, game ids that no longer line up — used to be a line
     in the container log and nothing else, which is why "the scores aren't
     populating" had no answer short of reading the code.
+
+    After a container/array restart Unraid's volume layer sometimes lets a
+    SELECT through on a stale connection and then rejects the journal create
+    for the status UPDATE (``unable to open database file``). Retrying once
+    on a brand-new session recovers that without failing the sync itself.
     """
+    payload = json.dumps(status)
+
+    def _write(session: Session) -> None:
+        session.merge(AppSetting(key=SCORE_SYNC_STATUS_KEY, value=payload))
+        session.commit()
+
     try:
-        db.merge(AppSetting(key=SCORE_SYNC_STATUS_KEY, value=json.dumps(status)))
-        db.commit()
+        _write(db)
+        return
     except Exception as e:  # never let bookkeeping break the sync
         logger.warning(f"Could not record score sync status: {e}")
-        db.rollback()
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        if not _is_sqlite_cantopen(e):
+            return
+
+    try:
+        fresh = SessionLocal()
+        try:
+            _write(fresh)
+            logger.info("Recorded score sync status after retry on a fresh connection")
+        finally:
+            fresh.close()
+    except Exception as e:
+        logger.warning(f"Could not record score sync status after retry: {e}")
 
 
 def get_score_sync_status(db: Session) -> dict | None:
@@ -668,15 +700,29 @@ def setup_scheduler():
     # Score sync: every 30 seconds. The dashboard and the all-picks page
     # reload on the same interval while a game is live, so a faster pull
     # would not show up any sooner.
-    scheduler.add_job(sync_scores, IntervalTrigger(seconds=30), id="sync_scores", replace_existing=True)
+    #
+    # coalesce + max_instances keep a slow ESPN pull from stacking overlapping
+    # writers against SQLite on a FUSE appdata path.
+    job_defaults = {"coalesce": True, "max_instances": 1, "replace_existing": True}
+    scheduler.add_job(
+        sync_scores, IntervalTrigger(seconds=30), id="sync_scores", **job_defaults
+    )
     # Spread sync: every 4 hours
-    scheduler.add_job(sync_spreads, IntervalTrigger(hours=4), id="sync_spreads", replace_existing=True)
+    scheduler.add_job(
+        sync_spreads, IntervalTrigger(hours=4), id="sync_spreads", **job_defaults
+    )
     # Lock enforcement: every minute
-    scheduler.add_job(enforce_locks, IntervalTrigger(minutes=1), id="enforce_locks", replace_existing=True)
+    scheduler.add_job(
+        enforce_locks, IntervalTrigger(minutes=1), id="enforce_locks", **job_defaults
+    )
     # Picks reminder push: every 5 minutes (low cost; only fires once per week)
-    scheduler.add_job(send_picks_reminders, IntervalTrigger(minutes=5), id="picks_reminders", replace_existing=True)
+    scheduler.add_job(
+        send_picks_reminders, IntervalTrigger(minutes=5), id="picks_reminders", **job_defaults
+    )
     # Pre-kickoff webhook: every minute, so a short lead time is not missed.
     # Fires at most once per week, and only when a URL is saved.
-    scheduler.add_job(fire_picks_webhook, IntervalTrigger(minutes=1), id="picks_webhook", replace_existing=True)
+    scheduler.add_job(
+        fire_picks_webhook, IntervalTrigger(minutes=1), id="picks_webhook", **job_defaults
+    )
     scheduler.start()
     logger.info("Scheduler started")

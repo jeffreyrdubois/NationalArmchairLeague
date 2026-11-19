@@ -93,6 +93,26 @@ def read_status(data_dir: str | None = None) -> dict:
         return {"state": "idle", "message": "No update has been run yet."}
 
 
+def _chown_like_database(data_dir: str, *paths: str) -> None:
+    """Match helper-written files to nal.db ownership.
+
+    The updater runs as root so it can talk to the Docker socket. Anything it
+    drops into the data volume after the replacement container has already
+    started (and already run its entrypoint chown) would otherwise stay
+    root-owned beside the database — and SQLite's next journal create in that
+    directory is what surfaces as ``unable to open database file``.
+    """
+    try:
+        st = os.stat(os.path.join(data_dir, "nal.db"))
+    except OSError:
+        return
+    for path in paths:
+        try:
+            os.chown(path, st.st_uid, st.st_gid)
+        except OSError:
+            pass
+
+
 def write_status(data_dir: str | None = None, **fields) -> dict:
     """Merge fields into the status file. Never raises — status is not the job.
 
@@ -106,11 +126,12 @@ def write_status(data_dir: str | None = None, **fields) -> dict:
     status["updated_at"] = _now()
     path = status_path(data_dir)
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         tmp = f"{path}.tmp"
         with open(tmp, "w", encoding="utf-8") as handle:
             json.dump(status, handle, indent=2)
         os.replace(tmp, path)
+        _chown_like_database(data_dir or data_dir_default(), path)
     except OSError as exc:
         logger.warning("Could not write update status: %s", exc)
     return status
