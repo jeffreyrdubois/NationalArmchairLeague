@@ -85,6 +85,13 @@ jobs:
       - name: Test score entry and the score sync
         run: python tests/test_score_entry.py
 
+      # After a container/array restart Unraid's volume layer can leave SQLite
+      # able to SELECT but unable to create a journal ("unable to open database
+      # file") on the score-sync status write. These pin the empty-URL fallback,
+      # the startup writability probe, and the fresh-connection retry.
+      - name: Test SQLite resilience after restart
+        run: python tests/test_sqlite_resilience.py
+
       # The pick grid and the week chips show a first name only. Two players
       # with the same first name used to be indistinguishable there; a shared
       # first name now keeps the first letter of the last name.

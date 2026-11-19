@@ -94,6 +94,19 @@ fi
 # rather than the volume, so it needs to be writable by the same user.
 chown -R "${PUID}:${PGID}" /app/app/static 2>/dev/null || true
 
+# Prove the volume will accept a journal file *before* dropping privileges.
+# SQLite reports a failed journal create as "unable to open database file",
+# which looks nothing like a permissions problem once uvicorn is running —
+# and the score-sync job then warns on it every 30 seconds while GETs still
+# return 200. Catching it here fails the start in a way Unraid surfaces.
+probe_file="$DATA_DIR/.nal_write_probe"
+if gosu "${PUID}:${PGID}" sh -c "echo ok > \"$probe_file\" && rm -f \"$probe_file\""; then
+  :
+else
+  log "ERROR: $DATA_DIR is not writable by ${PUID}:${PGID}; SQLite writes will fail"
+  log "ERROR: On Unraid, check the appdata path ownership and prefer a cache-pool mapping"
+fi
+
 # --- Docker socket, for updating the app from the admin page ---------------
 #
 # Optional: if the socket has not been mapped in, the update page says so and

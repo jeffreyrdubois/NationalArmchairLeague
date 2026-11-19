@@ -1,13 +1,85 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.pool import NullPool
+import logging
 import os
+from pathlib import Path
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/nal.db")
+logger = logging.getLogger(__name__)
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
-)
+
+def _resolve_database_url() -> str:
+    """Pick the database URL, never leaving an empty env override in place.
+
+    Compose and Unraid both pass ``DATABASE_URL`` through even when blank.
+    ``os.getenv("DATABASE_URL", default)`` returns ``""`` in that case, which
+    would hand SQLAlchemy an unusable URL and surface as the deeply unhelpful
+    ``unable to open database file`` once anything tries to write.
+    """
+    configured = (os.getenv("DATABASE_URL") or "").strip()
+    if configured:
+        return configured
+    data_dir = Path(os.getenv("DATA_DIR") or "./data")
+    return f"sqlite:///{(data_dir.resolve() / 'nal.db')}"
+
+
+DATABASE_URL = _resolve_database_url()
+
+
+def _sqlite_file_path(url_str: str) -> Path | None:
+    """Filesystem path for a file-backed SQLite URL, else None."""
+    url = make_url(url_str)
+    if url.get_backend_name() != "sqlite":
+        return None
+    database = url.database
+    if not database or database == ":memory:" or database.startswith("file:"):
+        return None
+    path = Path(database)
+    return path if path.is_absolute() else Path.cwd() / path
+
+
+def _build_engine(url_str: str):
+    """Create the engine, hardening the SQLite path Unraid deployments hit.
+
+    After a container or array restart the classic failure mode is: SELECTs
+    still work (an open FD or a readable ``nal.db``), but the first UPDATE
+    dies with ``unable to open database file`` because SQLite cannot create
+    its journal next to the database. Absolute paths, an ensured parent
+    directory, a busy timeout, and ``NullPool`` (no reused FDs from before a
+    remount) make that recoverable instead of a silent every-30s warning.
+    """
+    url = make_url(url_str)
+    connect_args: dict = {}
+    engine_kwargs: dict = {}
+
+    if url.get_backend_name() == "sqlite":
+        path = _sqlite_file_path(url_str)
+        connect_args = {"check_same_thread": False, "timeout": 30}
+        if path is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            url = url.set(database=str(path.resolve()))
+            # Fresh connection per checkout: a pooled FD survives a volume
+            # remount looking healthy until the first journal create, which is
+            # exactly the "reads work, score sync status cannot write" shape.
+            # Not used for :memory: — that needs a single shared connection.
+            engine_kwargs["poolclass"] = NullPool
+
+    return create_engine(url, connect_args=connect_args, **engine_kwargs)
+
+
+engine = _build_engine(DATABASE_URL)
+
+if make_url(str(engine.url)).get_backend_name() == "sqlite":
+
+    @event.listens_for(engine, "connect")
+    def _on_sqlite_connect(dbapi_conn, _connection_record):
+        # busy_timeout is milliseconds; complements the connect() timeout so a
+        # brief FUSE stall waits instead of failing the score-sync write.
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()
+
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -24,9 +96,40 @@ def get_db():
         db.close()
 
 
+def _assert_sqlite_writable() -> None:
+    """Fail startup loudly if the volume will not accept a SQLite write.
+
+    The score-sync job used to swallow the same error every 30 seconds while
+    the rest of the app looked fine on read-only traffic. A probe here turns
+    that into an entrypoint/health failure the operator can actually see.
+    """
+    path = _sqlite_file_path(str(engine.url))
+    if path is None:
+        return
+
+    probe = path.parent / ".nal_write_probe"
+    try:
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+    except OSError as e:
+        raise RuntimeError(
+            f"Data directory {path.parent} is not writable ({e}). "
+            "SQLite needs to create journal files beside the database. "
+            "On Unraid: confirm the appdata path is on a cache pool and owned "
+            f"by PUID:PGID (defaults 99:100)."
+        ) from e
+
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE IF NOT EXISTS _nal_write_probe (x INTEGER)"))
+        conn.execute(text("INSERT INTO _nal_write_probe (x) VALUES (1)"))
+        conn.execute(text("DELETE FROM _nal_write_probe"))
+        conn.execute(text("DROP TABLE _nal_write_probe"))
+
+
 def init_db():
     from app import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    _assert_sqlite_writable()
     _migrate()
     _repair()
 
