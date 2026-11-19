@@ -1,0 +1,207 @@
+name: Forward opened, reopened, or commented issue to Cursor
+
+on:
+  issues:
+    types: [opened, reopened]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  forward:
+    # issue_comment also fires for pull request conversation comments.
+    # Skip those, bot authors, and this run's own comments (sentinel).
+    if: >
+      github.event_name == 'issues' ||
+      (
+        github.event.action == 'created' &&
+        !github.event.issue.pull_request &&
+        github.event.comment.user.type != 'Bot' &&
+        !contains(github.event.comment.body, '<!-- nal-grok -->')
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST qualifying issue events to the Cursor automation
+        env:
+          WEBHOOK_URL: ${{ secrets.CURSOR_WEBHOOK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.CURSOR_AUTOMATION_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.error, urllib.request
+
+          RESUME_PHRASES = (
+              "resume", "continue", "migration ran", "ran the migration",
+              "fix the ci", "fix ci", "ci failed", "conflicts", "conflict",
+              "please fix", "update applied",
+          )
+
+          # Whole-comment matches, after punctuation is removed.
+          STATUS_EXACT = {
+              "any update",
+              "any updates",
+              "is ci green",
+              "is the ci green",
+              "ci green",
+              "is ci red",
+              "is the ci red",
+              "ci status",
+              "whats the status",
+              "what is the status",
+              "how is it going",
+              "any progress",
+              "still working",
+              "status",
+              "status check",
+              "checking in",
+          }
+
+          # Longer comments that are still only a status check.
+          STATUS_CONTAINS = (
+              "any update",
+              "any updates",
+              "is ci green",
+              "is the ci green",
+              "ci status",
+              "whats the status",
+              "what is the status",
+              "how is it going",
+              "any progress",
+              "checking in",
+              "still working",
+          )
+
+          # Words that can surround a status check without adding an instruction.
+          STATUS_FILLER = {
+              "a", "an", "the", "this", "that", "it", "is", "are", "was", "be",
+              "i", "we", "you", "me", "my", "our", "your", "do", "does",
+              "just", "still", "there", "yet", "on", "for", "to", "of", "and", "or", "so",
+              "hi", "hey", "hello", "thanks", "thank", "please",
+              "if", "whether", "when", "have", "has", "had",
+              "see", "saw", "look", "looking",
+              "moment", "today", "now", "quick", "all", "good", "ok", "okay",
+              "wondering", "checking", "in", "check",
+              "issue", "pr", "ci", "status", "update", "updates",
+              "any", "what", "whats", "how", "going", "progress", "working",
+              "robert", "jeffrey", "grok", "cursor",
+              "can", "could", "would", "will", "let", "know", "need", "anything", "else",
+              "from", "before", "with", "about", "again",
+          }
+
+          COMMENT_LIMIT = 8000
+          STATUS_MAX_CHARS = 240
+
+
+          def normalize(text):
+              lowered = text.lower().replace("'", "")
+              cleaned = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in lowered)
+              return " ".join(cleaned.split())
+
+
+          def skip_reason(event):
+              """Return a skip message, or None when the event should start a Cursor run."""
+              if event.get("action") != "created" or "comment" not in event:
+                  return None
+              if event.get("issue", {}).get("pull_request"):
+                  return "Skipped: pull request conversation comment"
+
+              issue = event.get("issue", {})
+              comment = event.get("comment", {})
+              if (comment.get("user") or {}).get("type") == "Bot":
+                  return "Skipped: bot comment"
+              body_text = (comment.get("body") or "").strip()
+              if "<!-- nal-grok -->" in body_text:
+                  return "Skipped: sentinel comment"
+
+              labels = [lbl.get("name", "") for lbl in issue.get("labels", [])]
+              lower = body_text.lower()
+              has_resume = any(phrase in lower for phrase in RESUME_PHRASES)
+              if "NeedsJeffrey" in labels and not has_resume:
+                  return "Skipped: NeedsJeffrey present and no resume phrase in comment"
+              if len(body_text) < 40 and not has_resume:
+                  return f"Skipped: short comment ({len(body_text)} chars) with no resume phrase"
+              if not has_resume and is_status_only(body_text):
+                  return "Skipped: status-only comment"
+              return None
+
+
+          def is_status_only(body_text):
+              normalized = normalize(body_text)
+              if not normalized:
+                  return False
+              if normalized in STATUS_EXACT:
+                  return True
+              if len(body_text) > STATUS_MAX_CHARS:
+                  return False
+              if not any(phrase in normalized for phrase in STATUS_CONTAINS):
+                  return False
+              remainder = normalized
+              for phrase in sorted(STATUS_CONTAINS, key=len, reverse=True):
+                  remainder = remainder.replace(phrase, " ")
+              words = [word for word in remainder.split() if word not in STATUS_FILLER]
+              return not words
+
+
+          def build_context(event):
+              issue = event.get("issue") or {}
+              title = " ".join((issue.get("title") or "").split())
+              lines = [
+                  "event: issue_comment" if "comment" in event else "event: issues",
+                  f"action: {event.get('action') or ''}",
+                  f"issue: {issue.get('number')}",
+                  f"title: {title}",
+                  f"url: {issue.get('html_url') or ''}",
+              ]
+              labels = [lbl.get("name", "") for lbl in issue.get("labels", []) if lbl.get("name")]
+              if labels:
+                  lines.append("labels: " + ", ".join(labels))
+              comment = event.get("comment")
+              if comment:
+                  author = (comment.get("user") or {}).get("login") or ""
+                  lines.append(f"comment_author: {author}")
+                  lines.append(f"comment_url: {comment.get('html_url') or ''}")
+                  body = comment.get("body") or ""
+                  if len(body) > COMMENT_LIMIT:
+                      body = body[:COMMENT_LIMIT] + "\n[comment truncated; read comment_url]"
+                  lines.append("comment:")
+                  lines.append(body)
+              lines.append("Read this issue with gh. No other issue is in scope.")
+              return "\n".join(lines)
+
+
+          def main():
+              url = os.environ.get("WEBHOOK_URL", "").strip()
+              secret = os.environ.get("WEBHOOK_SECRET", "").strip()
+              if not url or not secret:
+                  raise SystemExit("Missing CURSOR_WEBHOOK_URL or CURSOR_AUTOMATION_KEY")
+
+              with open(os.environ["GITHUB_EVENT_PATH"], "r", encoding="utf-8") as handle:
+                  event = json.load(handle)
+
+              reason = skip_reason(event)
+              if reason:
+                  print(reason)
+                  return
+
+              payload = json.dumps({"context": build_context(event)}).encode()
+              request = urllib.request.Request(
+                  url,
+                  data=payload,
+                  headers={
+                      "content-type": "application/json",
+                      "authorization": f"Bearer {secret}",
+                  },
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      print(response.status, response.read().decode()[:300])
+              except urllib.error.HTTPError as error:
+                  print(error.status, error.read().decode()[:1000])
+                  raise
+
+
+          if __name__ == "__main__":
+              main()
+          PY
