@@ -90,21 +90,35 @@ elif [ -n "$(find "$DATA_DIR" ! -user "$PUID" -print -quit 2>/dev/null)" ]; then
     log "WARNING: could not chown $DATA_DIR; writes may fail"
 fi
 
+# Ownership alone is not enough: a root-copied nal.db can be 0644-owned-by-99
+# while the directory itself is 0555, which still blocks journal creation.
+chmod u+rwX "$DATA_DIR" 2>/dev/null || true
+if [ -e "$DATA_DIR/nal.db" ]; then
+  chmod u+rw "$DATA_DIR/nal.db" 2>/dev/null || true
+fi
+# Sidecars left behind by a crash or a root-run helper also have to be writable.
+for side in "$DATA_DIR"/nal.db-journal "$DATA_DIR"/nal.db-wal "$DATA_DIR"/nal.db-shm; do
+  if [ -e "$side" ]; then
+    chown "${PUID}:${PGID}" "$side" 2>/dev/null || true
+    chmod u+rw "$side" 2>/dev/null || true
+  fi
+done
+
 # FastAPI creates the static mount point at import time; it is inside the image
 # rather than the volume, so it needs to be writable by the same user.
 chown -R "${PUID}:${PGID}" /app/app/static 2>/dev/null || true
 
 # Prove the volume will accept a journal file *before* dropping privileges.
-# SQLite reports a failed journal create as "unable to open database file",
-# which looks nothing like a permissions problem once uvicorn is running —
-# and the score-sync job then warns on it every 30 seconds while GETs still
-# return 200. Catching it here fails the start in a way Unraid surfaces.
+# Log only — do not abort. A hard exit here took the league offline when the
+# volume was briefly unhappy; the app can still serve reads and the operator
+# still sees this line in the Unraid log.
 probe_file="$DATA_DIR/.nal_write_probe"
 if gosu "${PUID}:${PGID}" sh -c "echo ok > \"$probe_file\" && rm -f \"$probe_file\""; then
   :
 else
   log "ERROR: $DATA_DIR is not writable by ${PUID}:${PGID}; SQLite writes will fail"
-  log "ERROR: On Unraid, check the appdata path ownership and prefer a cache-pool mapping"
+  log "ERROR: On Unraid, run: chown -R ${PUID}:${PGID} <appdata/nal> && chmod -R u+rwX <appdata/nal>"
+  log "ERROR: Prefer a cache-pool mapping over a FUSE /mnt/user path"
 fi
 
 # --- Docker socket, for updating the app from the admin page ---------------

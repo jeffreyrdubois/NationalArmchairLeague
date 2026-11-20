@@ -96,40 +96,67 @@ def get_db():
         db.close()
 
 
-def _assert_sqlite_writable() -> None:
-    """Fail startup loudly if the volume will not accept a SQLite write.
+def check_sqlite_writable() -> bool:
+    """Return whether the volume will accept a SQLite write.
 
-    The score-sync job used to swallow the same error every 30 seconds while
-    the rest of the app looked fine on read-only traffic. A probe here turns
-    that into an entrypoint/health failure the operator can actually see.
+    Logs loudly on failure but does **not** raise: taking the whole league
+    offline on kickoff night because Unraid's appdata ownership glitched is
+    worse than serving reads while writes warn. The entrypoint already printed
+    the same diagnosis; this is the in-process confirmation.
     """
     path = _sqlite_file_path(str(engine.url))
     if path is None:
-        return
+        return True
 
     probe = path.parent / ".nal_write_probe"
     try:
         probe.write_text("ok", encoding="utf-8")
         probe.unlink(missing_ok=True)
     except OSError as e:
-        raise RuntimeError(
-            f"Data directory {path.parent} is not writable ({e}). "
-            "SQLite needs to create journal files beside the database. "
-            "On Unraid: confirm the appdata path is on a cache pool and owned "
-            f"by PUID:PGID (defaults 99:100)."
-        ) from e
+        logger.error(
+            "Data directory %s is not writable (%s). SQLite needs to create "
+            "journal files beside the database. On Unraid: chown -R 99:100 "
+            "the appdata folder (or your PUID:PGID) and prefer a cache-pool "
+            "mapping over /mnt/user.",
+            path.parent, e,
+        )
+        return False
 
-    with engine.begin() as conn:
-        conn.execute(text("CREATE TABLE IF NOT EXISTS _nal_write_probe (x INTEGER)"))
-        conn.execute(text("INSERT INTO _nal_write_probe (x) VALUES (1)"))
-        conn.execute(text("DELETE FROM _nal_write_probe"))
-        conn.execute(text("DROP TABLE _nal_write_probe"))
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE IF NOT EXISTS _nal_write_probe (x INTEGER)"))
+            conn.execute(text("INSERT INTO _nal_write_probe (x) VALUES (1)"))
+            conn.execute(text("DELETE FROM _nal_write_probe"))
+            conn.execute(text("DROP TABLE _nal_write_probe"))
+    except Exception as e:  # noqa: BLE001 - startup must continue for reads
+        logger.error(
+            "SQLite write probe failed at %s: %s. Serving reads; writes may fail "
+            "until the data volume is writable by PUID:PGID.",
+            path, e,
+        )
+        return False
+    return True
+
+
+# Kept as an alias so older tests/imports keep working.
+_assert_sqlite_writable = check_sqlite_writable
 
 
 def init_db():
     from app import models  # noqa: F401
-    Base.metadata.create_all(bind=engine)
-    _assert_sqlite_writable()
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Could not ensure database schema: %s", e)
+        # A readable existing DB is still worth serving; a total open failure
+        # will surface on the first request.
+        return
+    if not check_sqlite_writable():
+        logger.error(
+            "Skipping migrate/repair until the data volume is writable — "
+            "the app is up for reads."
+        )
+        return
     _migrate()
     _repair()
 
