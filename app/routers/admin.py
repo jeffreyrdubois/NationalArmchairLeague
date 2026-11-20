@@ -4,6 +4,7 @@ Admin and Contributor routes.
 - Contributors: update spreads and scores manually
 - Admins: all of the above + manage users, edit any pick, manage seasons/weeks
 """
+import logging
 import os
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, Depends, Form, HTTPException, BackgroundTasks
@@ -29,6 +30,7 @@ from app.utils import (
     to_eastern,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
 
 TEST_SEASON_YEAR = 9999
@@ -1858,11 +1860,23 @@ async def start_update(
         return back(error="The confirmation did not match the version you picked.")
 
     settings = _update_settings(db)
-    db.add(AuditLog(
-        user_id=user.id, action="start_update", target_type="app",
-        detail=f"Update to {selfupdate.image_ref(tag)} started from {main_version()}",
-    ))
-    db.commit()
+    # The audit row is nice to have; it must never block the update. When the
+    # volume will not take a SQLite write (the "unable to open database file"
+    # after-restart shape), committing here used to 500 the page — which is
+    # exactly when you most need the updater, because the fixed image is what
+    # repairs the volume. Status lives on disk for that same reason.
+    try:
+        db.add(AuditLog(
+            user_id=user.id, action="start_update", target_type="app",
+            detail=f"Update to {selfupdate.image_ref(tag)} started from {main_version()}",
+        ))
+        db.commit()
+    except Exception as exc:  # noqa: BLE001 - update must proceed without the log
+        logger.warning("Could not audit start_update (continuing anyway): %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
     # After the response: pulling an image is minutes of work, and the browser
     # is going to watch /update/status for the result anyway.

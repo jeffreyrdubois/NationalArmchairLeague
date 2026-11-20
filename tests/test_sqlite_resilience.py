@@ -63,14 +63,31 @@ os.environ.pop("DATA_DIR", None)
 os.chmod({data!r}, 0o555)
 import app.database as database
 try:
-    database._assert_sqlite_writable()
-    raised = False
-except RuntimeError as e:
-    raised = True
-    assert "not writable" in str(e), e
+    ok = database.check_sqlite_writable()
 finally:
     os.chmod({data!r}, 0o755)
-assert raised, "readonly data dir must fail the startup probe"
+assert ok is False, "readonly data dir must fail the startup probe without crashing"
+print("ok")
+""")
+
+
+def test_init_db_still_starts_when_volume_is_not_writable():
+    """A bad volume must not take the league offline — reads still matter."""
+    data = tempfile.mkdtemp(prefix="nal-ro-init-")
+    _run_isolated(f"""
+import os
+os.environ["DATABASE_URL"] = {f"sqlite:///{data}/nal.db"!r}
+os.environ.pop("DATA_DIR", None)
+# Create the db as a writable user first, then lock the directory.
+import app.database as database
+from app.database import Base
+import app.models  # noqa: F401
+Base.metadata.create_all(bind=database.engine)
+os.chmod({data!r}, 0o555)
+try:
+    database.init_db()  # must not raise
+finally:
+    os.chmod({data!r}, 0o755)
 print("ok")
 """)
 

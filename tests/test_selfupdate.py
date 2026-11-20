@@ -949,6 +949,35 @@ def test_installing_from_the_page_runs_the_whole_thing():
     db.close()
 
 
+def test_update_still_starts_when_the_audit_log_cannot_write():
+    """A broken SQLite volume must not 500 the one button that can repair it."""
+    from unittest import mock
+    from sqlalchemy.orm.session import Session as SASession
+
+    db = SessionLocal()
+    boss, _player = make_users(db)
+    data = a_data_dir()
+    fake = a_fake(data_dir=data)
+    with wired_up(fake, data):
+        with mock.patch.object(
+            SASession,
+            "commit",
+            side_effect=Exception(
+                "(sqlite3.OperationalError) unable to open database file"
+            ),
+        ):
+            resp = client_for(boss).post(
+                "/admin/update/start", data={"tag": NEW_TAG, "confirm": NEW_TAG},
+                follow_redirects=False,
+            )
+        assert resp.status_code == 303, (resp.status_code, resp.headers.get("location"))
+        assert "error=" not in resp.headers["location"], resp.headers["location"]
+        assert fake.pulled == [NEW_IMAGE], fake.pulled
+        status = selfupdate.read_status(data)
+        assert status["state"] in ("pulling", "swapping", "done"), status
+    db.close()
+
+
 def test_not_knowing_which_container_we_are_says_how_to_fix_it():
     """A failure nobody could diagnose from "it did not work"."""
     db = SessionLocal()
